@@ -34,16 +34,33 @@ export function installLocalAuth(app: FastifyInstance, options: LocalAuthOptions
       return reject(reply, 403, "FORBIDDEN", "Origin is not allowed");
     }
 
+    const websocketProtocols = parseWebSocketProtocols(request.headers["sec-websocket-protocol"]);
     const protocol = request.headers["x-noneedwork-protocol"];
-    if (protocol !== String(PROTOCOL_VERSION)) {
+    if (
+      protocol !== String(PROTOCOL_VERSION) &&
+      !websocketProtocols.includes(`noneedwork.v${PROTOCOL_VERSION}`)
+    ) {
       return reject(reply, 403, "FORBIDDEN", "Protocol version is missing or unsupported");
     }
 
     const authorization = request.headers.authorization;
     const prefix = "Bearer ";
-    const token = authorization?.startsWith(prefix) ? authorization.slice(prefix.length) : "";
+    const websocketToken = websocketProtocols
+      .find((candidate) => candidate.startsWith("noneedwork.token."))
+      ?.slice("noneedwork.token.".length);
+    const token = authorization?.startsWith(prefix)
+      ? authorization.slice(prefix.length)
+      : (websocketToken ?? "");
     if (!constantTimeTokenEqual(options.launchToken, token)) {
       return reject(reply, 401, "UNAUTHORIZED", "Launch token is missing or invalid");
     }
   });
+}
+
+function parseWebSocketProtocols(header: string | string[] | undefined): string[] {
+  const value = Array.isArray(header) ? header.join(",") : (header ?? "");
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }

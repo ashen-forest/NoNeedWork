@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "golden-002",
+  "fixture": "golden-002",
+  "objective": "Correct the sum implementation.",
+  "path": "src/sum.js",
+  "oldText": "left - right",
+  "newText": "left + right",
+  "verificationCommand": ["node", "test.mjs"]
+}

@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { projectIdSchema, taskIdSchema, taskRunIdSchema } from "./ids.js";
+import {
+  artifactIdSchema,
+  projectIdSchema,
+  stepIdSchema,
+  taskIdSchema,
+  taskRunIdSchema,
+} from "./ids.js";
 
 export const taskStatusSchema = z.enum([
   "CREATED",
@@ -9,6 +15,7 @@ export const taskStatusSchema = z.enum([
   "EXECUTING",
   "VERIFYING",
   "REPLANNING",
+  "PAUSED",
   "SUCCEEDED",
   "FAILED",
   "CANCELLED",
@@ -33,6 +40,50 @@ export const createTaskRequestSchema = z.object({
   budget: taskBudgetSchema.optional(),
 });
 
+export const planStepStatusSchema = z.enum([
+  "PENDING",
+  "READY",
+  "RUNNING",
+  "SUCCEEDED",
+  "PARTIAL",
+  "FAILED",
+  "SKIPPED",
+  "CANCELLED",
+]);
+
+export const planStepSchema = z.object({
+  id: stepIdSchema,
+  taskRunId: taskRunIdSchema,
+  position: z.number().int().nonnegative(),
+  objective: z.string().trim().min(1),
+  dependencies: z.array(stepIdSchema),
+  acceptanceCriteria: z.array(z.string().trim().min(1)).min(1),
+  allowedPaths: z.array(z.string().trim().min(1)).min(1),
+  verificationCommands: z.array(z.array(z.string().min(1)).min(1)),
+  requiresWrite: z.boolean(),
+  status: planStepStatusSchema,
+  stateVersion: z.number().int().nonnegative(),
+  resultArtifactId: artifactIdSchema.nullable(),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+
+export const taskRunSchema = z.object({
+  id: taskRunIdSchema,
+  taskId: taskIdSchema,
+  status: taskStatusSchema,
+  stateVersion: z.number().int().nonnegative(),
+  replanCount: z.number().int().nonnegative(),
+  leaseOwner: z.string().nullable(),
+  leaseExpiresAt: z.iso.datetime({ offset: true }).nullable(),
+  checkpoint: z.record(z.string(), z.unknown()).nullable(),
+  piSessionId: z.string().nullable(),
+  piSessionFile: z.string().nullable(),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+  finishedAt: z.iso.datetime({ offset: true }).nullable(),
+});
+
 export const taskSnapshotSchema = z.object({
   id: taskIdSchema,
   projectId: projectIdSchema,
@@ -45,7 +96,22 @@ export const taskSnapshotSchema = z.object({
   updatedAt: z.iso.datetime({ offset: true }),
 });
 
+export const taskDetailsSchema = z.object({
+  task: taskSnapshotSchema,
+  run: taskRunSchema.nullable(),
+  planSteps: z.array(planStepSchema),
+  artifactIds: z.array(artifactIdSchema),
+});
+
+export const taskControlActionSchema = z.enum(["pause", "resume", "cancel"]);
+export const taskControlRequestSchema = z.object({ action: taskControlActionSchema });
+
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
+export type PlanStepStatus = z.infer<typeof planStepStatusSchema>;
+export type PlanStep = z.infer<typeof planStepSchema>;
+export type TaskRun = z.infer<typeof taskRunSchema>;
 export type TaskBudget = z.infer<typeof taskBudgetSchema>;
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 export type TaskSnapshot = z.infer<typeof taskSnapshotSchema>;
+export type TaskDetails = z.infer<typeof taskDetailsSchema>;
+export type TaskControlAction = z.infer<typeof taskControlActionSchema>;

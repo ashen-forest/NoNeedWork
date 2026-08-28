@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "golden-001",
+  "fixture": "golden-001",
+  "objective": "Fix the greeting typo so the public test passes.",
+  "path": "src/greeting.js",
+  "oldText": "helo",
+  "newText": "hello",
+  "verificationCommand": ["node", "test.mjs"]
+}

@@ -1,7 +1,10 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import { RuntimeClient } from "@noneedwork/client-sdk";
 import { type RuntimeHandshake, runtimeHandshakeSchema } from "@noneedwork/protocol";
 
 export interface StartedRuntime {
@@ -14,6 +17,11 @@ export interface StartRuntimeOptions {
   command?: string;
   args?: string[];
   timeoutMs?: number;
+}
+
+export interface RuntimeConnection {
+  client: RuntimeClient;
+  handshake: RuntimeHandshake;
 }
 
 export async function startRuntime(options: StartRuntimeOptions = {}): Promise<StartedRuntime> {
@@ -38,6 +46,47 @@ export async function startRuntime(options: StartRuntimeOptions = {}): Promise<S
     child.kill();
     throw error;
   }
+}
+
+export async function discoverRuntime(
+  appDataDirectory = defaultAppDataDirectory(),
+): Promise<RuntimeConnection | undefined> {
+  const registryPath = join(appDataDirectory, "runtime.json");
+  const handshake = await readFile(registryPath, "utf8")
+    .then((text) => runtimeHandshakeSchema.parse(JSON.parse(text)))
+    .catch(() => undefined);
+  if (!handshake) return undefined;
+  const client = createClient(handshake);
+  try {
+    await client.health();
+    return { client, handshake };
+  } catch {
+    return undefined;
+  }
+}
+
+export async function ensureRuntime(
+  appDataDirectory = defaultAppDataDirectory(),
+): Promise<RuntimeConnection> {
+  const existing = await discoverRuntime(appDataDirectory);
+  if (existing) return existing;
+
+  const runtimeEntry = fileURLToPath(new URL("../../../runtime/dist/main.js", import.meta.url));
+  const child = spawn(process.execPath, [runtimeEntry], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: process.env,
+  });
+  child.unref();
+
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const connection = await discoverRuntime(appDataDirectory);
+    if (connection) return connection;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error("Runtime did not become discoverable within 15000ms");
 }
 
 async function readHandshake(child: ChildProcess, timeoutMs: number): Promise<RuntimeHandshake> {
@@ -78,4 +127,18 @@ async function stopChild(child: ChildProcess): Promise<void> {
   const forceTimeout = setTimeout(() => child.kill("SIGKILL"), 5_000);
   forceTimeout.unref();
   await exited.finally(() => clearTimeout(forceTimeout));
+}
+
+function createClient(handshake: RuntimeHandshake): RuntimeClient {
+  return new RuntimeClient({
+    baseUrl: `http://${handshake.host}:${handshake.port}`,
+    bearerToken: handshake.bearerToken,
+  });
+}
+
+function defaultAppDataDirectory(): string {
+  return (
+    process.env.NONEEDWORK_APP_DATA_DIRECTORY ??
+    join(process.env.LOCALAPPDATA ?? join(process.cwd(), ".noneedwork-data"), "NoNeedWork")
+  );
 }

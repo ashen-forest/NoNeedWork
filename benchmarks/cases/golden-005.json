@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "golden-005",
+  "fixture": "golden-005",
+  "objective": "Normalize spaces when generating slugs.",
+  "path": "src/slug.js",
+  "oldText": "value.toLowerCase()",
+  "newText": "value.trim().toLowerCase().replace(/\\s+/gu, \"-\")",
+  "verificationCommand": ["node", "test.mjs"]
+}

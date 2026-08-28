@@ -58,11 +58,25 @@ export type NoNeedWorkPiEvent =
 
 export interface NoNeedWorkSession {
   readonly id: string;
+  readonly sessionFile: string | undefined;
   readonly activeToolNames: readonly string[];
   prompt(text: string): Promise<void>;
   steer(text: string): Promise<void>;
   cancel(): Promise<void>;
   waitForIdle(): Promise<void>;
+  getLastAssistantText(): string | undefined;
   subscribe(listener: (event: NoNeedWorkPiEvent) => void): () => void;
   dispose(): void;
 }
+
+export interface WorkspaceToolResult {
+  ok: boolean;
+  content: string;
+  details?: unknown;
+}
+
+export type WorkspaceToolDispatcher = (
+  name: string,
+  input: unknown,
+  toolCallId: string,
+) => Promise<WorkspaceToolResult>;

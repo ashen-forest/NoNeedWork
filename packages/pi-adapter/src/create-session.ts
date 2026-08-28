@@ -86,11 +86,13 @@ export async function createNoNeedWorkSession(
 
   return {
     id: session.sessionId,
+    sessionFile: session.sessionFile,
     activeToolNames: [...activeToolNames],
     prompt: async (text) => session.prompt(text, { expandPromptTemplates: false, source: "rpc" }),
     steer: async (text) => session.steer(text),
     cancel: async () => session.abort(),
     waitForIdle: async () => session.waitForIdle(),
+    getLastAssistantText: () => session.getLastAssistantText(),
     subscribe: (listener) => session.subscribe((event) => listener(normalizePiEvent(event))),
     dispose: () => session.dispose(),
   };

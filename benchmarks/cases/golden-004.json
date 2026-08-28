@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "golden-004",
+  "fixture": "golden-004",
+  "objective": "Enable safe mode by default.",
+  "path": "src/config.js",
+  "oldText": "safeMode: false",
+  "newText": "safeMode: true",
+  "verificationCommand": ["node", "test.mjs"]
+}

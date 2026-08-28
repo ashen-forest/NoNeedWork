@@ -15,5 +15,8 @@ relevant redacted trace IDs. Never include live credentials.
 
 ## Current boundary
 
-The Phase 1 code is not a security boundary. The v0.1 target is to reduce accidental local
-damage for a single developer; it is not designed to execute malicious multi-tenant code.
+The Phase 2 code is not yet a security boundary. It isolates the task workspace and records
+durable tool operations, but the Phase 3 policy engine, one-shot approvals, credential
+keyring, sandbox hardening suite, and approved host patch application are not implemented.
+The v0.1 target is to reduce accidental local damage for a single developer; it is not
+designed to execute malicious or multi-tenant code.

@@ -38,6 +38,14 @@ describe("ToolGateway", () => {
     await expect(gateway.dispatch("bash", {}, { sandboxId: "sandbox-1" })).rejects.toThrow(
       /Unknown tool/u,
     );
-    expect(gateway.toolNames).toEqual(["read_file", "list_files", "search_text"]);
+    expect(gateway.toolNames).toEqual([
+      "read_file",
+      "list_files",
+      "search_text",
+      "write_file",
+      "apply_edit",
+      "run_command",
+      "git_diff",
+    ]);
   });
 });

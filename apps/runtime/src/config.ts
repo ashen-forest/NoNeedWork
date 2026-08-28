@@ -12,6 +12,8 @@ export interface RuntimeConfig {
 
 export function createRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): RuntimeConfig {
   const localAppData = process.env.LOCALAPPDATA ?? join(process.cwd(), ".noneedwork-data");
+  const appDataDirectory =
+    process.env.NONEEDWORK_APP_DATA_DIRECTORY ?? join(localAppData, "NoNeedWork");
   return {
     host: "127.0.0.1",
     port: 0,
@@ -21,7 +23,7 @@ export function createRuntimeConfig(overrides: Partial<RuntimeConfig> = {}): Run
       "http://tauri.localhost",
       "https://tauri.localhost",
     ]),
-    appDataDirectory: join(localAppData, "NoNeedWork"),
+    appDataDirectory,
     version: "0.0.0",
     ...overrides,
   };

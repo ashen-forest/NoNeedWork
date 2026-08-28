@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "golden-003",
+  "fixture": "golden-003",
+  "objective": "Make clamp respect both its lower and upper bounds.",
+  "path": "src/clamp.js",
+  "oldText": "Math.max(minimum, value)",
+  "newText": "Math.min(maximum, Math.max(minimum, value))",
+  "verificationCommand": ["node", "test.mjs"]
+}
