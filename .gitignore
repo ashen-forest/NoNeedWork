@@ -3,6 +3,7 @@ node_modules/
 dist/
 coverage/
 target/
+.sidecar-build/
 .env
 .env.*
 !.env.example
@@ -12,3 +13,6 @@ target/
 artifacts/
 workspaces/
 logs/
+apps/desktop/src-tauri/binaries/*
+!apps/desktop/src-tauri/binaries/.gitkeep
+packaging/runtime-sidecar/node_modules/

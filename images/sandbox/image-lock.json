@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "image": "noneedwork/sandbox:0.1",
+  "baseImage": "node:24.9.0-bookworm-slim",
+  "baseDigest": null,
+  "note": "Phase 1 CI resolves and records the multi-platform base digest before a release is cut."
+}

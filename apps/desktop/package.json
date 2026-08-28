@@ -1,0 +1,25 @@
+{
+  "name": "@noneedwork/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "check:types": "tsc -p tsconfig.json --noEmit",
+    "dev": "vite",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@noneedwork/client-sdk": "0.0.0",
+    "@tauri-apps/api": "2.11.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "vite": "8.2.2"
+  }
+}

@@ -1,0 +1,20 @@
+[package]
+name = "noneedwork-desktop"
+version = "0.0.0"
+description = "NoNeedWork local agent workbench"
+authors = ["NoNeedWork contributors"]
+edition = "2021"
+
+[lib]
+name = "noneedwork_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tauri = { version = "=2.11.5", features = [] }
+tauri-plugin-shell = "=2.3.5"
+uuid = { version = "=1.26.0", features = ["v4"] }

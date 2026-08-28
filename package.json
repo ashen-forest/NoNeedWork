@@ -1,0 +1,40 @@
+{
+  "name": "noneedwork",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first software engineering agent built on PI with durable execution, sandboxing, evals, permissions, and bounded multi-agent coordination.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24.9 <25",
+    "npm": ">=11 <12"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build:packages && npm run build:apps",
+    "build:apps": "npm run build -w @noneedwork/runtime && npm run build -w @noneedwork/cli && npm run build -w @noneedwork/desktop",
+    "build:packages": "npm run build -w @noneedwork/protocol && npm run build -w @noneedwork/pi-adapter && npm run build -w @noneedwork/client-sdk",
+    "check": "npm run check:types && biome check .",
+    "check:fix": "biome check --write .",
+    "check:types": "npm run check:types --workspaces --if-present",
+    "precheck:types": "npm run build:packages",
+    "pretest": "npm run build:packages",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "ci": "npm run check && npm run test && npm run build",
+    "sidecar:build": "node scripts/build-runtime-sidecar.mjs",
+    "sidecar:verify": "node scripts/verify-sidecar.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@types/node": "24.13.3",
+    "@vitest/coverage-v8": "4.1.11",
+    "postject": "1.0.0-alpha.6",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
+  }
+}

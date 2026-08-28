@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Minimal Workbench window and event access. The Rust host owns the runtime sidecar and its bearer token.",
+  "windows": ["main"],
+  "permissions": ["core:app:default", "core:event:default", "core:window:default"]
+}
