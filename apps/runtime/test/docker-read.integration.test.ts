@@ -24,26 +24,44 @@ afterAll(async () => {
 
 dockerTest("Docker read-only tool path", () => {
   it("copies a fixture and reads it without host bind mounts or networking", async () => {
+    const credentialName = "NONEEDWORK_TEST_MODEL_CREDENTIAL";
+    const credentialValue = "must-not-cross-the-sandbox-boundary";
+    const previousCredential = process.env[credentialName];
+    process.env[credentialName] = credentialValue;
+
     const fixture = await mkdtemp(join(tmpdir(), "noneedwork-docker-fixture-"));
     directories.push(fixture);
     await mkdir(join(fixture, "src"));
     await writeFile(join(fixture, "README.md"), "NoNeedWork fixture\n", "utf8");
     await writeFile(join(fixture, "src", "index.ts"), "export const ready = true;\n", "utf8");
 
-    const sandboxId = await provider.createWorkspace(fixture);
-    sandboxes.push(sandboxId);
-    const gateway = new ToolGateway(provider);
+    try {
+      const sandboxId = await provider.createWorkspace(fixture);
+      sandboxes.push(sandboxId);
+      const gateway = new ToolGateway(provider);
 
-    await expect(
-      gateway.dispatch("read_file", { path: "README.md" }, { sandboxId }),
-    ).resolves.toMatchObject({ ok: true, content: "NoNeedWork fixture\n" });
+      await expect(
+        gateway.dispatch("read_file", { path: "README.md" }, { sandboxId }),
+      ).resolves.toMatchObject({ ok: true, content: "NoNeedWork fixture\n" });
 
-    const inspection = await provider.inspectSandbox(sandboxId);
-    expect(inspection.HostConfig.Binds ?? []).toEqual([]);
-    expect(inspection.HostConfig.NetworkMode).toBe("none");
-    expect(inspection.HostConfig.ReadonlyRootfs).toBe(true);
-    expect(inspection.HostConfig.CapDrop).toContain("ALL");
-    expect(inspection.HostConfig.Tmpfs?.["/workspace"]).toContain("uid=10001");
-    expect(inspection.Config.Env ?? []).toEqual([]);
+      const inspection = await provider.inspectSandbox(sandboxId);
+      expect(inspection.HostConfig.Binds ?? []).toEqual([]);
+      expect(inspection.HostConfig.NetworkMode).toBe("none");
+      expect(inspection.HostConfig.ReadonlyRootfs).toBe(true);
+      expect(inspection.HostConfig.CapDrop).toContain("ALL");
+      expect(inspection.HostConfig.Tmpfs?.["/workspace"]).toContain("uid=10001");
+
+      const sandboxEnvironment = inspection.Config.Env ?? [];
+      const environmentNames = sandboxEnvironment.map((entry) => entry.split("=", 1)[0]);
+      expect(environmentNames.sort()).toEqual(["NODE_VERSION", "PATH", "YARN_VERSION"]);
+      expect(sandboxEnvironment.join("\n")).not.toContain(credentialValue);
+      expect(environmentNames).not.toContain(credentialName);
+    } finally {
+      if (previousCredential === undefined) {
+        delete process.env[credentialName];
+      } else {
+        process.env[credentialName] = previousCredential;
+      }
+    }
   }, 60_000);
 });
