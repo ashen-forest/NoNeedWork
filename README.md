@@ -5,8 +5,9 @@ embeds the [PI agent harness](https://github.com/earendil-works/pi) and adds dur
 execution, mandatory tool mediation, Docker isolation, bounded sub-agents, traceable
 approvals, and reproducible evaluations.
 
-> Status: architecture and Phase 1 foundation are in progress. Do not use this repository
-> to execute untrusted code yet.
+> Status: the Phase 1 runtime and packaging foundation is implemented. The complete v0.1
+> golden path is still under development; do not use this repository to execute untrusted
+> code yet.
 
 ## Product principles
 

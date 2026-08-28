@@ -23,6 +23,7 @@
     "precheck:types": "npm run build:packages",
     "pretest": "npm run build:packages",
     "test": "vitest run",
+    "test:integration": "vitest run apps/runtime/test",
     "test:coverage": "vitest run --coverage",
     "ci": "npm run check && npm run test && npm run build",
     "sidecar:build": "node scripts/build-runtime-sidecar.mjs",

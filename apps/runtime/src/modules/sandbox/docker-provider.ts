@@ -1,6 +1,6 @@
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
-import { PassThrough, Readable } from "node:stream";
+import { PassThrough } from "node:stream";
 
 import type Docker from "dockerode";
 import tar from "tar-stream";
@@ -55,7 +55,7 @@ export class DockerProvider implements SandboxExecutor {
     const container = await this.#docker.createContainer(createOfflineSandboxProfile(this.#image));
     try {
       await container.start();
-      await container.putArchive(Readable.from(archive), { path: "/workspace" });
+      await uploadWorkspaceArchive(container, archive);
       const ready = await this.execute(
         container.id,
         ["test", "-f", "/tmp/noneedwork-ready"],
@@ -132,6 +132,39 @@ export class DockerProvider implements SandboxExecutor {
 
   async removeSandbox(sandboxId: string): Promise<void> {
     await this.#docker.getContainer(sandboxId).remove({ force: true, v: true });
+  }
+}
+
+async function uploadWorkspaceArchive(container: Docker.Container, archive: Buffer): Promise<void> {
+  const extraction = await container.exec({
+    Cmd: ["tar", "-x", "-f", "-", "-C", "/workspace"],
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+    WorkingDir: "/workspace",
+    Env: [],
+  });
+  const stream = await extraction.start({ hijack: true, stdin: true });
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  const stderrChunks: Buffer[] = [];
+  stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+  container.modem.demuxStream(stream, stdout, stderr);
+
+  const finished = new Promise<void>((resolveStream, rejectStream) => {
+    stream.once("end", resolveStream);
+    stream.once("error", rejectStream);
+  });
+  stream.write(archive);
+  stream.end();
+  await finished;
+
+  const inspection = await extraction.inspect();
+  if (inspection.ExitCode !== 0) {
+    throw new Error(
+      `Sandbox workspace upload failed with ${String(inspection.ExitCode)}: ${Buffer.concat(stderrChunks).toString("utf8")}`,
+    );
   }
 }
 
