@@ -43,6 +43,7 @@ dockerTest("Docker read-only tool path", () => {
     expect(inspection.HostConfig.NetworkMode).toBe("none");
     expect(inspection.HostConfig.ReadonlyRootfs).toBe(true);
     expect(inspection.HostConfig.CapDrop).toContain("ALL");
+    expect(inspection.HostConfig.Tmpfs?.["/workspace"]).toContain("uid=10001");
     expect(inspection.Config.Env ?? []).toEqual([]);
   }, 60_000);
 });

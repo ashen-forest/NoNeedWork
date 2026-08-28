@@ -54,8 +54,8 @@ export class DockerProvider implements SandboxExecutor {
     const archive = await createSeedArchive(sourceRoot, this.#maxSeedBytes);
     const container = await this.#docker.createContainer(createOfflineSandboxProfile(this.#image));
     try {
-      await container.putArchive(Readable.from(archive), { path: "/" });
       await container.start();
+      await container.putArchive(Readable.from(archive), { path: "/workspace" });
       const ready = await this.execute(
         container.id,
         ["test", "-f", "/tmp/noneedwork-ready"],
@@ -162,7 +162,7 @@ async function createSeedArchive(sourceRoot: string, maxBytes: number): Promise<
       if (relativePath.startsWith("../") || relativePath === "..") {
         throw new Error(`Sandbox seed escaped source root: ${absolutePath}`);
       }
-      const archivePath = `seed/${relativePath}`;
+      const archivePath = relativePath;
       if (stat.isDirectory()) {
         await writeTarEntry(pack, { name: archivePath, type: "directory", mode: 0o755 });
         await addDirectory(absolutePath);
@@ -181,7 +181,6 @@ async function createSeedArchive(sourceRoot: string, maxBytes: number): Promise<
     }
   }
 
-  await writeTarEntry(pack, { name: "seed", type: "directory", mode: 0o755 });
   await addDirectory(sourceRoot);
   pack.finalize();
   await finished;
