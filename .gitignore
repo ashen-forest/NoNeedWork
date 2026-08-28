@@ -1,0 +1,14 @@
+.superpowers/
+node_modules/
+dist/
+coverage/
+target/
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+artifacts/
+workspaces/
+logs/
