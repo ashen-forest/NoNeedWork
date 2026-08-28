@@ -10,9 +10,9 @@ target/
 *.db
 *.db-shm
 *.db-wal
-artifacts/
-workspaces/
-logs/
+/artifacts/
+/workspaces/
+/logs/
 apps/desktop/src-tauri/binaries/*
 !apps/desktop/src-tauri/binaries/.gitkeep
 packaging/runtime-sidecar/node_modules/
