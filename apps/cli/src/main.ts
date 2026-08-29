@@ -3,6 +3,7 @@ import { Command } from "commander";
 
 import { registerArtifactCommand } from "./commands/artifact.js";
 import { registerDoctorCommand } from "./commands/doctor.js";
+import { registerModelCommand } from "./commands/model.js";
 import { registerProjectCommand } from "./commands/project.js";
 import { registerRuntimeCommand } from "./commands/runtime.js";
 import { registerTaskCommand } from "./commands/task.js";
@@ -16,6 +17,7 @@ const program = new Command()
 registerDoctorCommand(program);
 registerRuntimeCommand(program);
 registerProjectCommand(program);
+registerModelCommand(program);
 registerTaskCommand(program);
 registerArtifactCommand(program);
 registerTraceCommand(program);

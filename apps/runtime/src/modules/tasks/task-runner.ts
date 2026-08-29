@@ -45,8 +45,8 @@ export class TaskRunner {
     const project = this.projects.get(details.task.projectId);
     if (!project) throw new Error(`Unknown project ${details.task.projectId}`);
     const driver = this.createDriver({ taskId, projectRoot: project.rootPath });
-    const promise = this.orchestrator.run(taskId, project.rootPath, driver).finally(() => {
-      driver.dispose?.();
+    const promise = this.orchestrator.run(taskId, project.rootPath, driver).finally(async () => {
+      await driver.dispose?.();
       this.#active.delete(taskId);
     });
     this.#active.set(taskId, { driver, promise });

@@ -1,15 +1,16 @@
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-import type { NoNeedWorkModel, NoNeedWorkModelRuntime } from "./types.js";
+import type { NoNeedWorkModelHandle } from "./model-runtime.js";
+import { resolveNoNeedWorkModelIdentity } from "./provider-profiles.js";
 
 export type FauxModelTurn =
   | { text: string }
-  | { toolCall: { name: string; args: Record<string, unknown> } };
+  | { toolCall: { name: string; args: Record<string, unknown> } }
+  | { error: string };
 
 export interface FauxModelHarness {
-  model: NoNeedWorkModel;
-  modelRuntime: NoNeedWorkModelRuntime;
+  modelHandle: NoNeedWorkModelHandle;
 }
 
 /** Deterministic model seam for contract and integration tests only. */
@@ -21,12 +22,30 @@ export async function createFauxModelHarness(
     turns.map((turn) =>
       "text" in turn
         ? fauxAssistantMessage(turn.text)
-        : fauxAssistantMessage(fauxToolCall(turn.toolCall.name, turn.toolCall.args), {
-            stopReason: "toolUse",
-          }),
+        : "toolCall" in turn
+          ? fauxAssistantMessage(fauxToolCall(turn.toolCall.name, turn.toolCall.args), {
+              stopReason: "toolUse",
+            })
+          : fauxAssistantMessage("", { stopReason: "error", errorMessage: turn.error }),
     ),
   );
   const modelRuntime = await ModelRuntime.create({ refreshOnCreate: false });
   modelRuntime.registerNativeProvider(faux.provider);
-  return { model: faux.getModel(), modelRuntime };
+  let disposed = false;
+  const model = faux.getModel();
+  return {
+    modelHandle: {
+      identity: resolveNoNeedWorkModelIdentity({
+        profileId: "qwen-cn",
+        modelId: "qwen3.7-plus",
+      }),
+      createSessionModelOptions: () => {
+        if (disposed) throw new Error("Faux model handle is disposed");
+        return { model, modelRuntime };
+      },
+      dispose: async () => {
+        disposed = true;
+      },
+    },
+  };
 }

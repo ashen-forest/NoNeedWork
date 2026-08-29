@@ -2,11 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { fauxAssistantMessage, fauxProvider, fauxToolCall, Type } from "@earendil-works/pi-ai";
-import { defineTool, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
+import { defineTool, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createNoNeedWorkSession } from "./create-session.js";
+import { createFauxModelHarness } from "./testing.js";
 import type { NoNeedWorkPiEvent } from "./types.js";
 
 const tempDirectories: string[] = [];
@@ -22,16 +23,10 @@ describe("PI adapter contract", () => {
     const directory = await mkdtemp(join(tmpdir(), "noneedwork-pi-"));
     tempDirectories.push(directory);
 
-    const faux = fauxProvider({ provider: "noneedwork-faux", api: "noneedwork-faux" });
-    faux.setResponses([
-      fauxAssistantMessage(fauxToolCall("workspace_read", { path: "README.md" }), {
-        stopReason: "toolUse",
-      }),
-      fauxAssistantMessage("The workspace was read safely."),
+    const faux = await createFauxModelHarness([
+      { toolCall: { name: "workspace_read", args: { path: "README.md" } } },
+      { text: "The workspace was read safely." },
     ]);
-
-    const modelRuntime = await ModelRuntime.create({ refreshOnCreate: false });
-    modelRuntime.registerNativeProvider(faux.provider);
     let executions = 0;
     const readTool = defineTool({
       name: "workspace_read",
@@ -52,8 +47,7 @@ describe("PI adapter contract", () => {
       agentDir: join(directory, ".agent"),
       systemPrompt: "Use only the explicitly supplied workspace tools.",
       customTools: [readTool],
-      model: faux.getModel(),
-      modelRuntime,
+      modelHandle: faux.modelHandle,
       sessionManager: SessionManager.inMemory(directory),
     });
     const events: NoNeedWorkPiEvent[] = [];
@@ -84,7 +78,46 @@ describe("PI adapter contract", () => {
       );
     } finally {
       unsubscribe();
-      session.dispose();
+      await session.dispose();
+    }
+  });
+
+  it("does not use ambient credentials or PI auth/model files and never retries", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "noneedwork-pi-closed-model-"));
+    tempDirectories.push(directory);
+    const agentDir = join(directory, ".agent");
+    const previousQwen = process.env.QWEN_TOKEN_PLAN_CN_API_KEY;
+    const previousMinimax = process.env.MINIMAX_CN_API_KEY;
+    process.env.QWEN_TOKEN_PLAN_CN_API_KEY = "ambient-qwen-secret";
+    process.env.MINIMAX_CN_API_KEY = "ambient-minimax-secret";
+    const faux = await createFauxModelHarness([{ error: "transient provider failure" }]);
+    const session = await createNoNeedWorkSession({
+      cwd: directory,
+      agentDir,
+      systemPrompt: "closed prompt",
+      customTools: [],
+      modelHandle: faux.modelHandle,
+      sessionManager: SessionManager.inMemory(directory),
+    });
+    const events: NoNeedWorkPiEvent[] = [];
+    const unsubscribe = session.subscribe((event) => events.push(event));
+    try {
+      await session.prompt("fail once");
+      expect(events.filter((event) => event.type.startsWith("retry."))).toEqual([]);
+      expect(session.getLastModelFailure()).toMatchObject({ reason: "MODEL_PROTOCOL_ERROR" });
+      await expect(
+        import("node:fs/promises").then(({ access }) => access(join(agentDir, "auth.json"))),
+      ).rejects.toThrow();
+      await expect(
+        import("node:fs/promises").then(({ access }) => access(join(agentDir, "models.json"))),
+      ).rejects.toThrow();
+    } finally {
+      unsubscribe();
+      await session.dispose();
+      if (previousQwen === undefined) delete process.env.QWEN_TOKEN_PLAN_CN_API_KEY;
+      else process.env.QWEN_TOKEN_PLAN_CN_API_KEY = previousQwen;
+      if (previousMinimax === undefined) delete process.env.MINIMAX_CN_API_KEY;
+      else process.env.MINIMAX_CN_API_KEY = previousMinimax;
     }
   });
 

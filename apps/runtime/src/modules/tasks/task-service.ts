@@ -1,17 +1,21 @@
 import {
   type CreateTaskRequest,
   createTaskRequestSchema,
+  createTaskRunId,
   type TaskControlAction,
   type TaskDetails,
   type TaskStatus,
   taskControlActionSchema,
+  taskModelBindingSchema,
 } from "@noneedwork/protocol";
 
+import type { ModelService } from "../models/model-service.js";
 import type { ProjectRepository } from "../storage/repositories/project-repository.js";
 import type { TaskRepository } from "../storage/repositories/task-repository.js";
 import { assertTaskTransition, isTerminalTaskStatus } from "./task-state-machine.js";
 
 const RESUMABLE = new Set<TaskStatus>([
+  "PREPARING",
   "PLANNING",
   "AWAITING_APPROVAL",
   "EXECUTING",
@@ -23,13 +27,21 @@ export class TaskService {
   constructor(
     private readonly projects: ProjectRepository,
     private readonly tasks: TaskRepository,
+    private readonly models: ModelService,
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   create(rawRequest: CreateTaskRequest): TaskDetails {
     const request = createTaskRequestSchema.parse(rawRequest);
     if (!this.projects.get(request.projectId))
       throw new Error(`Unknown project ${request.projectId}`);
-    const created = this.tasks.create(request, { schemaVersion: 1, source: "local-api" });
+    const resolved = this.models.resolveTaskSelection(request.model);
+    const binding = taskModelBindingSchema.parse({
+      runId: createTaskRunId(),
+      ...resolved,
+      createdAt: this.now().toISOString(),
+    });
+    const created = this.tasks.create(request, { schemaVersion: 1, source: "local-api" }, binding);
     const details = this.tasks.details(created.task.id);
     if (!details) throw new Error(`Task ${created.task.id} disappeared after creation`);
     return details;

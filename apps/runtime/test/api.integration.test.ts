@@ -1,9 +1,14 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { RuntimeClient } from "@noneedwork/client-sdk";
+import {
+  createFauxModelHarness,
+  listNoNeedWorkModelProfiles,
+  resolveNoNeedWorkModelIdentity,
+} from "@noneedwork/pi-adapter";
 import {
   artifactListSchema,
   eventPageSchema,
@@ -17,6 +22,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildRuntimeApp } from "../src/app.js";
 import { createRuntimeConfig } from "../src/config.js";
+import { FakeCredentialVault } from "../src/modules/credentials/fake-credential-vault.js";
+import type { RuntimeModelAdapter } from "../src/modules/models/model-service.js";
 import type { ProposedPlan } from "../src/modules/planning/plan-schema.js";
 import type {
   StepExecutionResult,
@@ -288,6 +295,147 @@ describe("Phase 2 Local API", () => {
     ).toContain("changes.patch");
     await sandbox.cleanup();
   });
+
+  it("preserves a MiniMax binding across credential loss, preflight pause, and resume", async () => {
+    // GIVEN: A fake Credential Manager, deterministic PI handle, and observable sandbox provider
+    const sandbox = new LocalWorkspaceSandbox();
+    const vault = new FakeCredentialVault();
+    const faux = await createFauxModelHarness([
+      {
+        text: JSON.stringify({
+          schemaVersion: 1,
+          objective: "Create RESULT.md",
+          steps: [
+            {
+              key: "create-result",
+              objective: "Create RESULT.md",
+              dependencies: [],
+              acceptanceCriteria: ["node test.mjs exits successfully"],
+              allowedPaths: ["RESULT.md"],
+              verificationCommands: [["node", "test.mjs"]],
+              requiresWrite: true,
+            },
+          ],
+        }),
+      },
+      {
+        toolCall: {
+          name: "write_file",
+          args: { path: "RESULT.md", content: "done\n" },
+        },
+      },
+      { text: "Created and verified RESULT.md." },
+    ]);
+    const minimaxHandle = {
+      identity: resolveNoNeedWorkModelIdentity({
+        profileId: "minimax-cn",
+        modelId: "MiniMax-M3",
+      }),
+      createSessionModelOptions: () => faux.modelHandle.createSessionModelOptions(),
+      dispose: () => faux.modelHandle.dispose(),
+    };
+    const adapter: RuntimeModelAdapter = {
+      listProfiles: listNoNeedWorkModelProfiles,
+      resolveIdentity: resolveNoNeedWorkModelIdentity,
+      createHandle: async () => minimaxHandle,
+      probe: async ({ handle }) => ({
+        profileId: handle.identity.profileId,
+        modelId: handle.identity.modelId,
+        success: true,
+        latencyMs: 1,
+        checks: { text: true, toolCall: true },
+      }),
+    };
+    const runtime = await createTestRuntime({
+      dockerProvider: sandbox,
+      credentialVault: vault,
+      modelAdapter: adapter,
+      autoStartTasks: false,
+    });
+    const repository = join(runtime.directory, "model-recovery-repository");
+    await mkdir(repository);
+    await writeFile(join(repository, "README.md"), "fixture\n");
+    await writeFile(
+      join(repository, "test.mjs"),
+      "import { readFileSync } from 'node:fs'; if (readFileSync('RESULT.md', 'utf8') !== 'done\\n') process.exit(1);\n",
+    );
+    await execFileAsync("git", ["init", "--quiet", repository]);
+    await execFileAsync("git", ["-C", repository, "config", "user.email", "ci@noneedwork.dev"]);
+    await execFileAsync("git", ["-C", repository, "config", "user.name", "NoNeedWork CI"]);
+    await execFileAsync("git", ["-C", repository, "add", "."]);
+    await execFileAsync("git", ["-C", repository, "commit", "--quiet", "-m", "fixture"]);
+    const project = await runtime.services.projectService.open(repository);
+
+    // WHEN: Selecting MiniMax, creating a run, deleting its credential, and starting it
+    const profiles = await runtime.app.inject({
+      method: "GET",
+      url: "/v1/models/profiles",
+      headers: runtime.headers,
+    });
+    await runtime.app.inject({
+      method: "PUT",
+      url: "/v1/models/credentials/minimax-cn",
+      headers: runtime.headers,
+      payload: { secret: "noneedwork-minimax-integration-credential" },
+    });
+    await runtime.app.inject({
+      method: "PUT",
+      url: "/v1/models/selection",
+      headers: runtime.headers,
+      payload: { profileId: "minimax-cn", modelId: "MiniMax-M3" },
+    });
+    const created = runtime.services.taskService.create({
+      projectId: project.id,
+      objective: "Create RESULT.md",
+    });
+    await runtime.app.inject({
+      method: "DELETE",
+      url: "/v1/models/credentials/minimax-cn",
+      headers: runtime.headers,
+    });
+    const paused = await runtime.services.taskRunner.run(created.task.id);
+
+    // THEN: The immutable binding remains MiniMax and no sandbox exists before model readiness
+    expect(profiles.json().profiles).toEqual([
+      expect.objectContaining({ profileId: "qwen-cn", defaultModelId: "qwen3.7-plus" }),
+      expect.objectContaining({ profileId: "minimax-cn", defaultModelId: "MiniMax-M3" }),
+    ]);
+    expect(created.model).toMatchObject({
+      profileId: "minimax-cn",
+      piProviderId: "minimax-cn",
+      modelId: "MiniMax-M3",
+      selectionSource: "default",
+    });
+    expect(paused.run).toMatchObject({
+      status: "PAUSED",
+      checkpoint: { modelBlock: { reason: "MODEL_CREDENTIAL_MISSING" } },
+    });
+    expect(sandbox.directories).toHaveLength(0);
+
+    // WHEN: Restoring the credential and resuming through the authenticated API
+    await runtime.app.inject({
+      method: "PUT",
+      url: "/v1/models/credentials/minimax-cn",
+      headers: runtime.headers,
+      payload: { secret: "noneedwork-minimax-integration-credential" },
+    });
+    const resumed = await runtime.app.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.task.id}/control`,
+      headers: runtime.headers,
+      payload: { action: "resume" },
+    });
+    const completed = await runtime.services.taskRunner.run(created.task.id);
+
+    // THEN: The same binding completes without fallback and the host checkout stays unchanged
+    expect(resumed.statusCode).toBe(200);
+    expect(completed.task.status).toBe("SUCCEEDED");
+    expect(completed.model).toEqual(created.model);
+    expect(
+      await readFile(join(repository, "RESULT.md"), "utf8").catch(() => undefined),
+    ).toBeUndefined();
+    await sandbox.cleanup();
+  }, 60_000);
 });
 
 class ApiFixtureDriver implements TaskDriver {

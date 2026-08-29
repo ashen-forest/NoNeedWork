@@ -13,12 +13,17 @@ function dependencies(overrides: Partial<DoctorDependencies> = {}): DoctorDepend
       stdout: `${command} ${args.join(" ")}`,
       stderr: "",
     }),
+    modelStatus: async () => ({
+      runtimeAvailable: true,
+      selection: { profileId: "qwen-cn", modelId: "qwen3.7-plus" },
+      credentialConfigured: true,
+    }),
     ...overrides,
   };
 }
 
 describe("nw doctor", () => {
-  it("reports a ready machine without exposing credential values", async () => {
+  it("reports Runtime model readiness without inspecting environment credentials", async () => {
     const secret = "must-not-appear";
     const report = await runDoctor(
       dependencies({ env: { LOCALAPPDATA: "C:\\Temp", OPENAI_API_KEY: secret } }),
@@ -26,7 +31,18 @@ describe("nw doctor", () => {
 
     expect(report.ok).toBe(true);
     expect(JSON.stringify(report)).not.toContain(secret);
+    expect(report.checks.find((check) => check.id === "default-model")?.status).toBe("pass");
     expect(report.checks.find((check) => check.id === "model-credential")?.status).toBe("pass");
+  });
+
+  it("warns when Runtime model status is unavailable", async () => {
+    const report = await runDoctor(
+      dependencies({ modelStatus: async () => ({ runtimeAvailable: false }) }),
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.checks.find((check) => check.id === "default-model")?.status).toBe("warn");
+    expect(report.checks.find((check) => check.id === "model-credential")?.status).toBe("warn");
   });
 
   it("returns actionable failures for missing Docker and sandbox image", async () => {

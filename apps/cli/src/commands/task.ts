@@ -2,6 +2,7 @@ import type { TaskControlAction, TaskStatus } from "@noneedwork/protocol";
 import type { Command } from "commander";
 
 import { ensureRuntime } from "../client/runtime-discovery.js";
+import { parseTaskModelOption } from "./model.js";
 
 const TERMINAL = new Set<TaskStatus>(["SUCCEEDED", "FAILED", "CANCELLED"]);
 
@@ -11,17 +12,24 @@ export function registerTaskCommand(program: Command): void {
     .command("start")
     .requiredOption("--repo <path>", "Repository directory")
     .argument("<objective...>", "Task objective")
+    .option("--model <profile-id/model-id>", "Override the configured model for this TaskRun")
     .option("--json", "Print machine-readable JSON")
-    .action(async (objectiveParts: string[], options: { repo: string; json?: boolean }) => {
-      const { client } = await ensureRuntime();
-      const project = await client.openProject({ path: options.repo });
-      const details = await client.createTask({
-        projectId: project.id,
-        objective: objectiveParts.join(" "),
-      });
-      if (options.json) process.stdout.write(`${JSON.stringify(details, null, 2)}\n`);
-      else process.stdout.write(`${details.task.id}\t${details.task.status}\n`);
-    });
+    .action(
+      async (
+        objectiveParts: string[],
+        options: { repo: string; model?: string; json?: boolean },
+      ) => {
+        const { client } = await ensureRuntime();
+        const project = await client.openProject({ path: options.repo });
+        const details = await client.createTask({
+          projectId: project.id,
+          objective: objectiveParts.join(" "),
+          ...(options.model ? { model: parseTaskModelOption(options.model) } : {}),
+        });
+        if (options.json) process.stdout.write(`${JSON.stringify(details, null, 2)}\n`);
+        else process.stdout.write(`${details.task.id}\t${details.task.status}\n`);
+      },
+    );
 
   task
     .command("watch")

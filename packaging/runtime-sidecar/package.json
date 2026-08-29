@@ -5,6 +5,7 @@
   "type": "module",
   "dependencies": {
     "@fastify/websocket": "11.3.0",
+    "@napi-rs/keyring": "1.3.0",
     "@noneedwork/pi-adapter": "file:../../packages/pi-adapter",
     "@noneedwork/protocol": "file:../../packages/protocol",
     "dockerode": "5.0.1",

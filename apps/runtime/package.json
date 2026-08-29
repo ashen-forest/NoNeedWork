@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@fastify/websocket": "11.3.0",
+    "@napi-rs/keyring": "1.3.0",
     "@noneedwork/pi-adapter": "0.0.0",
     "@noneedwork/protocol": "0.0.0",
     "dockerode": "5.0.1",

@@ -1,15 +1,15 @@
 import type {
   CreateAgentSessionOptions,
-  ModelRuntime,
   SessionManager,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
+import type { NoNeedWorkModelHandle } from "./model-runtime.js";
+import type { NoNeedWorkProviderFailure } from "./provider-errors.js";
+
 export const FORBIDDEN_PI_TOOLS = ["bash", "powershell", "edit", "write"] as const;
 export const PI_SDK_VERSION = "0.84.3" as const;
 
-export type NoNeedWorkModel = NonNullable<CreateAgentSessionOptions["model"]>;
-export type NoNeedWorkModelRuntime = ModelRuntime;
 export type NoNeedWorkTool = ToolDefinition;
 
 export interface NoNeedWorkSessionOptions {
@@ -17,8 +17,7 @@ export interface NoNeedWorkSessionOptions {
   agentDir: string;
   systemPrompt: string;
   customTools: NoNeedWorkTool[];
-  model?: NoNeedWorkModel;
-  modelRuntime?: NoNeedWorkModelRuntime;
+  modelHandle: NoNeedWorkModelHandle;
   thinkingLevel?: CreateAgentSessionOptions["thinkingLevel"];
   resumeSessionFile?: string;
   inMemory?: boolean;
@@ -65,8 +64,9 @@ export interface NoNeedWorkSession {
   cancel(): Promise<void>;
   waitForIdle(): Promise<void>;
   getLastAssistantText(): string | undefined;
+  getLastModelFailure(): NoNeedWorkProviderFailure | undefined;
   subscribe(listener: (event: NoNeedWorkPiEvent) => void): () => void;
-  dispose(): void;
+  dispose(): Promise<void>;
 }
 
 export interface WorkspaceToolResult {

@@ -24,6 +24,7 @@
     "pretest": "npm run build:packages",
     "test": "vitest run",
     "test:integration": "vitest run apps/runtime/test",
+    "test:providers": "vitest run packages/pi-adapter/src/provider-runtime.contract.test.ts apps/runtime/test/model-provider.live.test.ts",
     "test:coverage": "vitest run --coverage",
     "ci": "npm run check && npm run test && npm run build",
     "sidecar:build": "node scripts/build-runtime-sidecar.mjs",

@@ -2,13 +2,12 @@
 
 NoNeedWork is a local-first, open-source software engineering agent for Windows. It
 embeds the [PI agent harness](https://github.com/earendil-works/pi) and adds durable task
-execution, mandatory tool mediation, Docker isolation, bounded sub-agents, traceable
-approvals, and reproducible evaluations.
+execution, mandatory tool mediation, Docker isolation, traceable state, and reproducible
+evaluations.
 
-> Status: Phase 2's durable single-agent golden path is implemented. The CLI can drive a
-> real PI `AgentSession` through planning, isolated edits, verification, restart recovery,
-> and patch/trace artifact export. Phase 3 policy, approval, credential, and sandbox
-> hardening is not implemented; do not use this repository to execute untrusted code yet.
+> Status: the durable single-agent golden path and locked Qwen/MiniMax Token Plan model
+> adapters are implemented. The repository is still pre-release development software; do
+> not use it to execute malicious or multi-tenant workloads.
 
 ## Product principles
 
@@ -16,7 +15,6 @@ approvals, and reproducible evaluations.
 - The real repository is not writable by the agent by default.
 - Every side effect must pass policy, approval when required, sandbox, and trace.
 - Unknown tool outcomes are verified or stopped; they are never silently replayed.
-- Sub-agents are depth-one, budgeted, and cannot expand their permissions.
 
 ## Current development prerequisites
 
@@ -33,7 +31,7 @@ npm ci
 npm run ci
 ```
 
-## Run the Phase 2 CLI
+## Run the CLI
 
 Build the Runtime and CLI, prepare the pinned sandbox image, and check the local
 prerequisites:
@@ -44,18 +42,27 @@ docker build -t noneedwork/sandbox:0.1 images/sandbox
 node apps/cli/dist/main.js doctor --json
 ```
 
-Set one supported provider credential in the same terminal, then start and watch a task:
+List the two locked provider profiles, store a credential interactively in Windows
+Credential Manager, select a model, then start and watch a task:
 
 ```powershell
-$env:ANTHROPIC_API_KEY = "<your-key>"
+node apps/cli/dist/main.js model list
+node apps/cli/dist/main.js model credential set qwen-cn
+node apps/cli/dist/main.js model select qwen-cn qwen3.7-plus
 node apps/cli/dist/main.js task start --repo C:\path\to\clean-repository "Fix the failing test" --json
 node apps/cli/dist/main.js task watch <task-id>
 node apps/cli/dist/main.js trace export <task-id> --output trace.json
 ```
 
+The credential prompt requires an interactive terminal and does not echo input. Environment
+variables, PI `auth.json`, and PI `models.json` are not credential or model sources. To use
+MiniMax, substitute `minimax-cn` and `MiniMax-M3`. See
+[`docs/model-providers.md`](docs/model-providers.md) for setup, testing, recovery, and data-use
+details.
+
 The agent changes a copied sandbox workspace and exports a patch artifact; it does not
-write the selected host repository. Phase 3 will add Windows Credential Manager storage,
-policy decisions, one-shot approvals, and approved host patch application.
+write the selected host repository. Model requests run in the host Runtime, while every
+model-requested tool side effect remains behind Tool Gateway and the offline sandbox.
 
 The approved design and executable implementation plan are available in
 [`docs/superpowers/specs/2026-08-28-noneedwork-system-design.md`](docs/superpowers/specs/2026-08-28-noneedwork-system-design.md)

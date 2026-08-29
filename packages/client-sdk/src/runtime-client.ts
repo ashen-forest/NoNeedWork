@@ -6,6 +6,17 @@ import {
   type EventStreamFrame,
   eventPageSchema,
   eventStreamFrameSchema,
+  type ModelCredentialStatus,
+  type ModelCredentialStatusList,
+  type ModelProbeResult,
+  type ModelProfileId,
+  type ModelProfileList,
+  type ModelSelection,
+  modelCredentialStatusListSchema,
+  modelCredentialStatusSchema,
+  modelProbeResultSchema,
+  modelProfileListSchema,
+  modelSelectionSchema,
   type OpenProjectRequest,
   PROTOCOL_VERSION,
   type Project,
@@ -91,6 +102,50 @@ export class RuntimeClient {
     return this.#request("/v1/projects", projectListSchema);
   }
 
+  listModelProfiles(): Promise<ModelProfileList> {
+    return this.#request("/v1/models/profiles", modelProfileListSchema);
+  }
+
+  getModelSelection(): Promise<ModelSelection> {
+    return this.#request("/v1/models/selection", modelSelectionSchema);
+  }
+
+  setModelSelection(selection: ModelSelection): Promise<ModelSelection> {
+    return this.#request("/v1/models/selection", modelSelectionSchema, {
+      method: "PUT",
+      body: JSON.stringify(modelSelectionSchema.parse(selection)),
+    });
+  }
+
+  listModelCredentials(): Promise<ModelCredentialStatusList> {
+    return this.#request("/v1/models/credentials", modelCredentialStatusListSchema);
+  }
+
+  setModelCredential(profileId: ModelProfileId, secret: string): Promise<ModelCredentialStatus> {
+    return this.#request(
+      `/v1/models/credentials/${encodeURIComponent(profileId)}`,
+      modelCredentialStatusSchema,
+      { method: "PUT", body: JSON.stringify({ secret }) },
+      true,
+    );
+  }
+
+  deleteModelCredential(profileId: ModelProfileId): Promise<ModelCredentialStatus> {
+    return this.#request(
+      `/v1/models/credentials/${encodeURIComponent(profileId)}`,
+      modelCredentialStatusSchema,
+      { method: "DELETE" },
+    );
+  }
+
+  probeModel(profileId: ModelProfileId): Promise<ModelProbeResult> {
+    return this.#request(
+      `/v1/models/probe/${encodeURIComponent(profileId)}`,
+      modelProbeResultSchema,
+      { method: "POST" },
+    );
+  }
+
   createTask(input: CreateTaskRequest): Promise<TaskDetails> {
     return this.#request("/v1/tasks", taskDetailsSchema, {
       method: "POST",
@@ -163,25 +218,35 @@ export class RuntimeClient {
     path: string,
     schema: { parse(value: unknown): T },
     init: RequestInit = {},
+    sensitiveBody = false,
   ): Promise<T> {
-    const response = await this.#fetchResponse(path, init);
+    const response = await this.#fetchResponse(path, init, sensitiveBody);
     const body = await response.json().catch(() => undefined);
     return schema.parse(body);
   }
 
-  async #fetchResponse(path: string, init: RequestInit = {}): Promise<Response> {
-    const response = await this.#fetch(new URL(path, this.#baseUrl), {
-      ...init,
-      headers: {
-        accept: "application/json",
-        authorization: `Bearer ${this.#bearerToken}`,
-        ...(init.body ? { "content-type": "application/json" } : {}),
-        "x-noneedwork-protocol": String(PROTOCOL_VERSION),
-        ...init.headers,
-      },
-    });
+  async #fetchResponse(
+    path: string,
+    init: RequestInit = {},
+    sensitiveBody = false,
+  ): Promise<Response> {
+    let response: Response;
+    try {
+      response = await this.#fetch(new URL(path, this.#baseUrl), {
+        ...init,
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${this.#bearerToken}`,
+          ...(init.body ? { "content-type": "application/json" } : {}),
+          "x-noneedwork-protocol": String(PROTOCOL_VERSION),
+          ...init.headers,
+        },
+      });
+    } finally {
+      if (sensitiveBody) delete init.body;
+    }
     if (!response.ok) {
-      const body = await response.json().catch(() => undefined);
+      const body = sensitiveBody ? undefined : await response.json().catch(() => undefined);
       throw new RuntimeClientError(
         `Runtime request failed with HTTP ${response.status}`,
         response.status,

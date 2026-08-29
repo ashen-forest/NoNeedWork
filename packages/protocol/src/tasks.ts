@@ -6,6 +6,7 @@ import {
   taskIdSchema,
   taskRunIdSchema,
 } from "./ids.js";
+import { modelSelectionSchema, taskModelBindingSchema } from "./models.js";
 
 export const taskStatusSchema = z.enum([
   "CREATED",
@@ -38,6 +39,7 @@ export const createTaskRequestSchema = z.object({
   projectId: projectIdSchema,
   objective: z.string().trim().min(1).max(20_000),
   budget: taskBudgetSchema.optional(),
+  model: modelSelectionSchema.optional(),
 });
 
 export const planStepStatusSchema = z.enum([
@@ -99,6 +101,7 @@ export const taskSnapshotSchema = z.object({
 export const taskDetailsSchema = z.object({
   task: taskSnapshotSchema,
   run: taskRunSchema.nullable(),
+  model: taskModelBindingSchema.nullable(),
   planSteps: z.array(planStepSchema),
   artifactIds: z.array(artifactIdSchema),
 });

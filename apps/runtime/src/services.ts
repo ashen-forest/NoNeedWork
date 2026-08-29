@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { RuntimeConfig } from "./config.js";
 import { ArtifactStore } from "./modules/artifacts/artifact-store.js";
+import type { CredentialVault } from "./modules/credentials/credential-vault.js";
+import { KeyringCredentialVault } from "./modules/credentials/keyring.js";
+import { ModelPreferenceRepository } from "./modules/models/model-preference-repository.js";
+import { ModelService, type RuntimeModelAdapter } from "./modules/models/model-service.js";
 import { PlanService } from "./modules/planning/plan-service.js";
 import { StepVerifier } from "./modules/planning/step-verifier.js";
 import { ProjectService } from "./modules/projects/project-service.js";
@@ -31,6 +35,8 @@ export interface RuntimeServices {
   sandboxes: SandboxRepository;
   projectService: ProjectService;
   taskService: TaskService;
+  credentialVault: CredentialVault;
+  modelService: ModelService;
   artifactStore: ArtifactStore;
   orchestrator: TaskOrchestrator;
   toolGateway: ToolGateway;
@@ -44,6 +50,8 @@ export interface RuntimeServiceOverrides {
   artifactRoot?: string;
   dockerProvider?: WorkspaceSandboxProvider;
   taskDriverFactory?: TaskDriverFactory;
+  credentialVault?: CredentialVault;
+  modelAdapter?: RuntimeModelAdapter;
   autoStartTasks?: boolean;
 }
 
@@ -56,6 +64,13 @@ export function createRuntimeServices(
   );
   const projects = new ProjectRepository(database);
   const tasks = new TaskRepository(database);
+  const credentialVault = overrides.credentialVault ?? new KeyringCredentialVault();
+  const modelService = new ModelService({
+    preferences: new ModelPreferenceRepository(database),
+    bindings: tasks.models,
+    credentials: credentialVault,
+    ...(overrides.modelAdapter ? { adapter: overrides.modelAdapter } : {}),
+  });
   const operations = new ToolOperationRepository(database);
   const sandboxes = new SandboxRepository(database);
   const artifactStore = new ArtifactStore(
@@ -68,7 +83,12 @@ export function createRuntimeServices(
     dockerProvider,
     new ToolAudit(operations, artifactStore, checkpoints),
   );
-  const recoveryDecisions = new RecoveryService(tasks.runs, operations).scan();
+  const recoveryDecisions = new RecoveryService(
+    tasks.runs,
+    operations,
+    () => new Date(),
+    tasks.models,
+  ).scan();
   const orchestrator = new TaskOrchestrator(
     tasks,
     sandboxes,
@@ -83,15 +103,24 @@ export function createRuntimeServices(
   );
   const createDriver: TaskDriverFactory =
     overrides.taskDriverFactory ??
-    (({ taskId, projectRoot }) =>
-      new PiTaskDriver({
+    (({ taskId, projectRoot }) => {
+      const binding = tasks.details(taskId)?.model ?? null;
+      return new PiTaskDriver({
         taskId,
         projectRoot,
         agentDirectory: join(config.appDataDirectory, "pi"),
         tasks,
         sandboxes,
         tools: toolGateway,
-      }));
+        binding,
+        prepareModelHandle: async () => {
+          if (!binding) {
+            throw new Error(`Task ${taskId} has no model binding`);
+          }
+          return modelService.createHandle(binding);
+        },
+      });
+    });
   const taskRunner = new TaskRunner(projects, tasks, orchestrator, createDriver);
   return {
     database,
@@ -99,7 +128,9 @@ export function createRuntimeServices(
     tasks,
     sandboxes,
     projectService: new ProjectService(projects),
-    taskService: new TaskService(projects, tasks),
+    taskService: new TaskService(projects, tasks, modelService),
+    credentialVault,
+    modelService,
     artifactStore,
     orchestrator,
     toolGateway,

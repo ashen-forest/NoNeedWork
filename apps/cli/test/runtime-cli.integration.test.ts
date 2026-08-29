@@ -66,6 +66,52 @@ describe("Phase 2 CLI over the Local API", () => {
     expect(environment.services.tasks.details(details.task.id)?.run?.id).toBe(details.run.id);
   });
 
+  it("lists, selects, and overrides the locked model profiles through the public CLI", async () => {
+    // GIVEN: A discoverable Runtime and local repository
+    const environment = await createCliRuntime();
+    const repository = join(environment.directory, "model-cli-repository");
+    await mkdir(repository);
+
+    // WHEN: Listing profiles, selecting MiniMax, then overriding one task back to Qwen
+    const listed = await runCli(environment, ["model", "list", "--json"]);
+    const selected = await runCli(environment, [
+      "model",
+      "select",
+      "minimax-cn",
+      "MiniMax-M3",
+      "--json",
+    ]);
+    const started = await runCli(environment, [
+      "task",
+      "start",
+      "--repo",
+      repository,
+      "--model",
+      "qwen-cn/qwen3.7-plus",
+      "Verify",
+      "the",
+      "model",
+      "binding",
+      "--json",
+    ]);
+
+    // THEN: Product profiles stay fixed and the TaskRun records the explicit override
+    expect(JSON.parse(listed.stdout).profiles).toEqual([
+      expect.objectContaining({ profileId: "qwen-cn", defaultModelId: "qwen3.7-plus" }),
+      expect.objectContaining({ profileId: "minimax-cn", defaultModelId: "MiniMax-M3" }),
+    ]);
+    expect(JSON.parse(selected.stdout)).toEqual({
+      profileId: "minimax-cn",
+      modelId: "MiniMax-M3",
+    });
+    expect(taskDetailsSchema.parse(JSON.parse(started.stdout)).model).toMatchObject({
+      profileId: "qwen-cn",
+      piProviderId: "qwen-token-plan-cn",
+      modelId: "qwen3.7-plus",
+      selectionSource: "task_override",
+    });
+  });
+
   it("watches ordered task events from the durable ledger", async () => {
     // GIVEN: A discoverable Runtime with one dormant task
     const environment = await createCliRuntime();
@@ -213,19 +259,20 @@ describe("Phase 2 CLI over the Local API", () => {
       },
       { text: "Changed and verified the isolated fixture." },
     ]);
-    environment.services.taskRunner.configureDriverFactory(
-      ({ taskId, projectRoot }) =>
-        new PiTaskDriver({
-          taskId,
-          projectRoot,
-          agentDirectory: join(environment.appDataDirectory, "pi-e2e"),
-          tasks: environment.services.tasks,
-          sandboxes: environment.services.sandboxes,
-          tools: environment.services.toolGateway,
-          model: faux.model,
-          modelRuntime: faux.modelRuntime,
-        }),
-    );
+    environment.services.taskRunner.configureDriverFactory(({ taskId, projectRoot }) => {
+      const binding = environment.services.tasks.details(taskId)?.model;
+      if (!binding) throw new Error(`Task ${taskId} has no model binding`);
+      return new PiTaskDriver({
+        taskId,
+        projectRoot,
+        agentDirectory: join(environment.appDataDirectory, "pi-e2e"),
+        tasks: environment.services.tasks,
+        sandboxes: environment.services.sandboxes,
+        tools: environment.services.toolGateway,
+        binding,
+        prepareModelHandle: async () => faux.modelHandle,
+      });
+    });
     const startTask = vi.spyOn(environment.services.taskRunner, "start");
 
     // WHEN: Starting and watching the task exclusively through the CLI

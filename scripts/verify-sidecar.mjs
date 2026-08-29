@@ -27,6 +27,26 @@ try {
   if (!response.ok || health?.engine?.name !== "pi" || health?.engine?.version !== "0.84.3") {
     throw new Error(`Sidecar health verification failed: ${JSON.stringify(health)}`);
   }
+  const profilesResponse = await fetch(
+    `http://${handshake.host}:${handshake.port}/v1/models/profiles`,
+    {
+      headers: {
+        authorization: `Bearer ${handshake.bearerToken}`,
+        "x-noneedwork-protocol": "1",
+      },
+    },
+  );
+  const profiles = await profilesResponse.json();
+  const defaults = Object.fromEntries(
+    (profiles?.profiles ?? []).map((profile) => [profile.profileId, profile.defaultModelId]),
+  );
+  if (
+    !profilesResponse.ok ||
+    defaults["qwen-cn"] !== "qwen3.7-plus" ||
+    defaults["minimax-cn"] !== "MiniMax-M3"
+  ) {
+    throw new Error(`Sidecar model profile verification failed: ${JSON.stringify(profiles)}`);
+  }
   process.stdout.write(
     `${JSON.stringify({
       kind: "noneedwork.sidecar.verified",
@@ -34,6 +54,7 @@ try {
       protocolVersion: health.protocolVersion,
       piVersion: health.engine.version,
       safeMode: health.engine.safeMode,
+      modelProfiles: defaults,
     })}\n`,
   );
 } finally {

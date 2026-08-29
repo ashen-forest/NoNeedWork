@@ -1,15 +1,16 @@
 import { mkdir } from "node:fs/promises";
 
 import {
+  classifyNoNeedWorkProviderFailure,
   createNoNeedWorkSession,
   createWorkspaceTools,
-  type NoNeedWorkModel,
-  type NoNeedWorkModelRuntime,
+  type NoNeedWorkModelHandle,
   type NoNeedWorkPiEvent,
   type NoNeedWorkSession,
 } from "@noneedwork/pi-adapter";
-import type { PlanStep, TaskBudget } from "@noneedwork/protocol";
+import type { PlanStep, TaskBudget, TaskModelBinding } from "@noneedwork/protocol";
 
+import { createModelBlock, ModelBlockedError } from "../models/model-errors.js";
 import type { ProposedPlan } from "../planning/plan-schema.js";
 import type { SandboxRepository } from "../storage/repositories/sandbox-repository.js";
 import type { TaskRepository } from "../storage/repositories/task-repository.js";
@@ -25,8 +26,8 @@ export interface PiTaskDriverOptions {
   tasks: TaskRepository;
   sandboxes: SandboxRepository;
   tools: ToolGateway;
-  model?: NoNeedWorkModel;
-  modelRuntime?: NoNeedWorkModelRuntime;
+  binding: TaskModelBinding | null;
+  prepareModelHandle: () => Promise<NoNeedWorkModelHandle>;
   inMemory?: boolean;
 }
 
@@ -37,12 +38,15 @@ export class PiTaskDriver implements TaskDriver {
   readonly #tasks: TaskRepository;
   readonly #sandboxes: SandboxRepository;
   readonly #tools: ToolGateway;
-  readonly #model: NoNeedWorkModel | undefined;
-  readonly #modelRuntime: NoNeedWorkModelRuntime | undefined;
+  readonly #binding: TaskModelBinding | null;
+  readonly #prepareModelHandle: () => Promise<NoNeedWorkModelHandle>;
   readonly #inMemory: boolean;
+  #modelHandle: NoNeedWorkModelHandle | undefined;
+  #preflightPromise: Promise<void> | undefined;
   #session: NoNeedWorkSession | undefined;
   #mode: "planning" | "executing" = "planning";
   #step: PlanStep | undefined;
+  #modelOutputObserved = false;
 
   constructor(options: PiTaskDriverOptions) {
     this.#taskId = options.taskId;
@@ -51,8 +55,8 @@ export class PiTaskDriver implements TaskDriver {
     this.#tasks = options.tasks;
     this.#sandboxes = options.sandboxes;
     this.#tools = options.tools;
-    this.#model = options.model;
-    this.#modelRuntime = options.modelRuntime;
+    this.#binding = options.binding;
+    this.#prepareModelHandle = options.prepareModelHandle;
     this.#inMemory = options.inMemory ?? false;
   }
 
@@ -63,17 +67,22 @@ export class PiTaskDriver implements TaskDriver {
     this.#mode = "planning";
     this.#step = undefined;
     const session = await this.#ensureSession();
-    await session.prompt(buildPlanPrompt(input.objective, input.budget));
+    await this.#prompt(session, buildPlanPrompt(input.objective, input.budget));
     const output = session.getLastAssistantText();
     if (!output) throw new Error("PI planner returned no assistant text");
     return output;
+  }
+
+  preflight(): Promise<void> {
+    this.#preflightPromise ??= this.#performPreflight();
+    return this.#preflightPromise;
   }
 
   async executeStep(input: { step: PlanStep; tools: TaskToolbox }): Promise<StepExecutionResult> {
     this.#mode = "executing";
     this.#step = input.step;
     const session = await this.#ensureSession();
-    await session.prompt(buildStepPrompt(input.step));
+    await this.#prompt(session, buildStepPrompt(input.step));
     return {
       summary: session.getLastAssistantText() ?? `PI completed plan step ${input.step.position}`,
     };
@@ -83,13 +92,22 @@ export class PiTaskDriver implements TaskDriver {
     await this.#session?.cancel();
   }
 
-  dispose(): void {
-    this.#session?.dispose();
+  async dispose(): Promise<void> {
+    const session = this.#session;
     this.#session = undefined;
+    if (session) {
+      await session.dispose();
+      this.#modelHandle = undefined;
+      return;
+    }
+    const handle = this.#modelHandle;
+    this.#modelHandle = undefined;
+    await handle?.dispose();
   }
 
   async #ensureSession(): Promise<NoNeedWorkSession> {
     if (this.#session) return this.#session;
+    if (!this.#modelHandle) throw new Error("PI task driver requires model preflight");
     const details = this.#tasks.details(this.#taskId);
     if (!details?.run) throw new Error(`Unknown task ${this.#taskId}`);
     await mkdir(this.#agentDirectory, { recursive: true });
@@ -97,11 +115,10 @@ export class PiTaskDriver implements TaskDriver {
       cwd: this.#projectRoot,
       agentDir: this.#agentDirectory,
       systemPrompt: SYSTEM_PROMPT,
+      modelHandle: this.#modelHandle,
       customTools: createWorkspaceTools((name, input, toolCallId) =>
         this.#dispatch(name, input, toolCallId),
       ),
-      ...(this.#model ? { model: this.#model } : {}),
-      ...(this.#modelRuntime ? { modelRuntime: this.#modelRuntime } : {}),
       ...(this.#inMemory ? { inMemory: true } : {}),
       ...(details.run.piSessionFile ? { resumeSessionFile: details.run.piSessionFile } : {}),
     });
@@ -109,6 +126,35 @@ export class PiTaskDriver implements TaskDriver {
     session.subscribe((event) => this.#recordEvent(event));
     this.#session = session;
     return session;
+  }
+
+  async #performPreflight(): Promise<void> {
+    if (!this.#binding) {
+      throw new ModelBlockedError(
+        createModelBlock({
+          reason: "MODEL_BINDING_MISSING",
+          profileId: "qwen-cn",
+          modelId: "qwen3.7-plus",
+        }),
+      );
+    }
+    const handle = await this.#prepareModelHandle();
+    if (
+      handle.identity.profileId !== this.#binding.profileId ||
+      handle.identity.piProviderId !== this.#binding.piProviderId ||
+      handle.identity.modelId !== this.#binding.modelId ||
+      handle.identity.piSdkVersion !== this.#binding.piSdkVersion
+    ) {
+      await handle.dispose();
+      throw new ModelBlockedError(
+        createModelBlock({
+          reason: "MODEL_UNAVAILABLE",
+          profileId: this.#binding.profileId,
+          modelId: this.#binding.modelId,
+        }),
+      );
+    }
+    this.#modelHandle = handle;
   }
 
   async #dispatch(name: string, input: unknown, toolCallId: string) {
@@ -135,6 +181,15 @@ export class PiTaskDriver implements TaskDriver {
   }
 
   #recordEvent(event: NoNeedWorkPiEvent): void {
+    if (
+      (event.type === "output.delta" && event.delta.length > 0) ||
+      event.type === "tool.started" ||
+      (event.type === "pi.event" &&
+        event.name.startsWith("message_update.") &&
+        event.name.endsWith("_delta"))
+    ) {
+      this.#modelOutputObserved = true;
+    }
     const details = this.#tasks.details(this.#taskId);
     if (!details?.run) return;
     if (event.type === "output.delta") {
@@ -144,6 +199,39 @@ export class PiTaskDriver implements TaskDriver {
     } else if (event.type === "agent.finished" || event.type === "retry.started") {
       this.#tasks.runs.events.append(this.#taskId, details.run.id, "DIAGNOSTIC", { ...event });
     }
+  }
+
+  async #prompt(session: NoNeedWorkSession, prompt: string): Promise<void> {
+    this.#modelOutputObserved = false;
+    try {
+      await session.prompt(prompt);
+      const failure = session.getLastModelFailure();
+      if (failure) throw this.#modelBlocked(failure);
+    } catch (error) {
+      if (error instanceof ModelBlockedError) throw error;
+      throw this.#modelBlocked(classifyNoNeedWorkProviderFailure(error, this.#modelOutputObserved));
+    }
+  }
+
+  #modelBlocked(failure: ReturnType<typeof classifyNoNeedWorkProviderFailure>): ModelBlockedError {
+    const binding = this.#binding;
+    if (!binding) {
+      return new ModelBlockedError(
+        createModelBlock({
+          reason: "MODEL_BINDING_MISSING",
+          profileId: "qwen-cn",
+          modelId: "qwen3.7-plus",
+        }),
+      );
+    }
+    return new ModelBlockedError(
+      createModelBlock({
+        reason: failure.reason,
+        profileId: binding.profileId,
+        modelId: binding.modelId,
+        ...(failure.retryAfterMs === undefined ? {} : { retryAfterMs: failure.retryAfterMs }),
+      }),
+    );
   }
 }
 

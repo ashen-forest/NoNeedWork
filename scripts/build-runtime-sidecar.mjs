@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { arch, platform } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -24,6 +24,7 @@ await runNpm(
   ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--install-links=true"],
   packagingRoot,
 );
+await findHostKeyringBinary(join(packagingRoot, "node_modules"), target.keyringBinary);
 
 await rm(buildRoot, { force: true, recursive: true });
 await rm(resourcesOutput, { force: true, recursive: true });
@@ -41,6 +42,7 @@ await cp(join(packagingRoot, "node_modules"), join(resourcesOutput, "node_module
   recursive: true,
 });
 await copyFile(join(packagingRoot, "package.json"), join(resourcesOutput, "package.json"));
+await findHostKeyringBinary(join(resourcesOutput, "node_modules"), target.keyringBinary);
 
 await writeFile(
   seaConfig,
@@ -83,17 +85,44 @@ function resolveTarget(hostPlatform, hostArch) {
   const targets = {
     "win32-x64": {
       fileName: "nw-runtime-x86_64-pc-windows-msvc.exe",
+      keyringBinary: "keyring.win32-x64-msvc.node",
     },
     "linux-x64": {
       fileName: "nw-runtime-x86_64-unknown-linux-gnu",
+      keyringBinary: "keyring.linux-x64-gnu.node",
     },
     "darwin-arm64": {
       fileName: "nw-runtime-aarch64-apple-darwin",
+      keyringBinary: "keyring.darwin-arm64.node",
     },
   };
   const target = targets[key];
   if (!target) throw new Error(`Unsupported sidecar build target: ${key}`);
   return target;
+}
+
+async function findHostKeyringBinary(nodeModules, expectedName) {
+  const keyringRoot = join(nodeModules, "@napi-rs");
+  const files = await collectFiles(keyringRoot);
+  const binaries = files.filter(
+    (path) => basename(path).startsWith("keyring.") && path.endsWith(".node"),
+  );
+  if (binaries.length !== 1 || basename(binaries[0]) !== expectedName) {
+    throw new Error(
+      `Expected exactly one compatible keyring binary ${expectedName}; found ${binaries.map((path) => basename(path)).join(", ") || "none"}`,
+    );
+  }
+  return binaries[0];
+}
+
+async function collectFiles(directory) {
+  const files = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await collectFiles(path)));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
 }
 
 function assertBuildPath(candidate, parent, expectedName) {

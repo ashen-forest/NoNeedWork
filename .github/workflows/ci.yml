@@ -36,6 +36,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Run type, lint, unit, and build gates
         run: npm run ci
+      - name: Run offline provider contracts
+        run: npm run test:providers
 
   sidecar:
     name: Sidecar smoke (${{ matrix.os }})
@@ -58,6 +60,11 @@ jobs:
         run: npm run sidecar:build
       - name: Verify authenticated PI Runtime startup
         run: npm run sidecar:verify
+      - name: Smoke-test native Windows Credential Manager binding
+        if: runner.os == 'Windows'
+        env:
+          NONEEDWORK_KEYRING_TESTS: "1"
+        run: npx vitest run apps/runtime/test/keyring-native.integration.test.ts
 
   sandbox:
     name: Docker sandbox integration
@@ -77,7 +84,7 @@ jobs:
       - name: Run Docker isolation contract
         env:
           NONEEDWORK_DOCKER_TESTS: "1"
-        run: npm test -- apps/runtime/test/docker-read.integration.test.ts
+        run: npx vitest run apps/runtime/test/docker-read.integration.test.ts apps/runtime/test/provider-credential-isolation.integration.test.ts
 
   tauri:
     name: Tauri compile (Windows)

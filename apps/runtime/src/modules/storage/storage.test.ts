@@ -2,13 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createTaskRequestSchema } from "@noneedwork/protocol";
+import { createTaskRequestSchema, type TaskModelBinding } from "@noneedwork/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ArtifactIntegrityError, ArtifactStore } from "../artifacts/artifact-store.js";
+import { createTestModelBinding } from "../models/testing.js";
 import { backupDatabase } from "./backup.js";
 import { RuntimeDatabase } from "./database.js";
-import { applyMigrations } from "./migrator.js";
+import { INITIAL_SCHEMA_SQL } from "./migrations/001-initial.js";
+import { applyMigrations, getSchemaVersion } from "./migrator.js";
 import { ApprovalRepository } from "./repositories/approval-repository.js";
 import { EvalRepository } from "./repositories/eval-repository.js";
 import { ProjectRepository } from "./repositories/project-repository.js";
@@ -39,7 +41,7 @@ describe("runtime storage", () => {
       const foreignKeys = database.connection.prepare("PRAGMA foreign_keys").get();
       const trustedSchema = database.connection.prepare("PRAGMA trusted_schema").get();
 
-      expect(version).toEqual({ version: 1 });
+      expect(version).toEqual({ version: 2 });
       expect(journal).toEqual({ journal_mode: "wal" });
       expect(foreignKeys).toEqual({ foreign_keys: 1 });
       expect(trustedSchema).toEqual({ trusted_schema: 0 });
@@ -62,6 +64,62 @@ describe("runtime storage", () => {
       `);
 
       expect(() => applyMigrations(database.connection)).toThrow(/rollback is refused/);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("migrates an existing version-1 database to model schema version 2", () => {
+    const database = new RuntimeDatabase(":memory:", { migrate: false });
+    try {
+      database.connection.exec(INITIAL_SCHEMA_SQL);
+      database.connection.exec(`
+        CREATE TABLE schema_meta (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          version INTEGER NOT NULL,
+          migration_name TEXT NOT NULL,
+          applied_at TEXT NOT NULL
+        ) STRICT;
+        INSERT INTO schema_meta VALUES (1, 1, 'initial', '2026-08-28T00:00:00.000Z');
+      `);
+
+      expect(applyMigrations(database.connection)).toBe(2);
+      expect(getSchemaVersion(database.connection)).toBe(2);
+      expect(
+        database.connection
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_run_models'",
+          )
+          .get(),
+      ).toEqual({ name: "task_run_models" });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rolls back task and TaskRun rows when model binding insertion fails", () => {
+    const database = new RuntimeDatabase(":memory:");
+    try {
+      const project = new ProjectRepository(database).open("C:/rollback", "1".repeat(64));
+      const tasks = new TaskRepository(database);
+      const invalidBinding = {
+        ...createTestModelBinding(),
+        selectionSource: "invalid",
+      } as unknown as TaskModelBinding;
+
+      expect(() =>
+        tasks.create(
+          createTaskRequestSchema.parse({ projectId: project.id, objective: "Rollback" }),
+          {},
+          invalidBinding,
+        ),
+      ).toThrow();
+      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM tasks").get()).toEqual({
+        count: 0,
+      });
+      expect(database.connection.prepare("SELECT COUNT(*) AS count FROM task_runs").get()).toEqual({
+        count: 0,
+      });
     } finally {
       database.close();
     }
@@ -95,6 +153,8 @@ describe("runtime storage", () => {
       const tasks = new TaskRepository(database);
       const created = tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: "Change fixture" }),
+        {},
+        createTestModelBinding(),
       );
       const original = tasks.runs.get(created.runId);
       if (!original) throw new Error("Expected TaskRun");
@@ -118,6 +178,8 @@ describe("runtime storage", () => {
       const tasks = new TaskRepository(database);
       const created = tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: "Persist core rows" }),
+        {},
+        createTestModelBinding(),
       );
 
       const approval = new ApprovalRepository(database).create({
@@ -163,6 +225,8 @@ describe("artifact store", () => {
       const tasks = new TaskRepository(database);
       const created = tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: "Produce patch" }),
+        {},
+        createTestModelBinding(),
       );
       const store = new ArtifactStore(join(directory, "artifacts"), tasks.artifacts);
 
@@ -190,6 +254,8 @@ describe("artifact store", () => {
       const tasks = new TaskRepository(database);
       const created = tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: "Tamper test" }),
+        {},
+        createTestModelBinding(),
       );
       const store = new ArtifactStore(join(directory, "artifacts"), tasks.artifacts);
       const artifact = await store.put({

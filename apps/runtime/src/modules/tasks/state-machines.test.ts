@@ -2,7 +2,11 @@ import type { PlanStepStatus, TaskStatus } from "@noneedwork/protocol";
 import { describe, expect, it } from "vitest";
 
 import { assertStepTransition, stepTransitionTable } from "./step-state-machine.js";
-import { assertTaskTransition, taskTransitionTable } from "./task-state-machine.js";
+import {
+  assertTaskTransition,
+  canTransitionTask,
+  taskTransitionTable,
+} from "./task-state-machine.js";
 
 describe("TaskRun state machine", () => {
   it("accepts exactly the declared transition table", () => {
@@ -18,6 +22,11 @@ describe("TaskRun state machine", () => {
         }
       }
     }
+  });
+
+  it("supports durable model preflight pause and resume", () => {
+    expect(canTransitionTask("PREPARING", "PAUSED")).toBe(true);
+    expect(canTransitionTask("PAUSED", "PREPARING")).toBe(true);
   });
 });
 

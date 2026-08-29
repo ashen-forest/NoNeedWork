@@ -30,6 +30,7 @@ import {
 import { ToolAudit } from "../src/modules/tools/tool-audit.js";
 import { ToolGateway } from "../src/modules/tools/tool-gateway.js";
 import { LocalWorkspaceSandbox } from "./helpers/local-workspace-sandbox.js";
+import { createTestModelBinding } from "./helpers/model-binding.js";
 
 const execFileAsync = promisify(execFile);
 const root = resolve(import.meta.dirname, "../../..");
@@ -118,6 +119,8 @@ describe("Phase 2 deterministic golden path", () => {
       const project = harness.projects.open(environment.repository, "a".repeat(64));
       const created = harness.tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: testCase.objective }),
+        {},
+        createTestModelBinding(),
       );
       const driver = await createGoldenPiDriver(
         harness,
@@ -173,6 +176,8 @@ describe("Phase 2 deterministic golden path", () => {
     const project = first.projects.open(environment.repository, "e".repeat(64));
     const created = first.tasks.create(
       createTaskRequestSchema.parse({ projectId: project.id, objective: testCase.objective }),
+      {},
+      createTestModelBinding(),
     );
     const driver = await createGoldenPiDriver(
       first,
@@ -181,6 +186,9 @@ describe("Phase 2 deterministic golden path", () => {
       environment.directory,
       testCase,
     );
+    const createdDetails = requireTaskDetails(first.tasks, created.task.id);
+    first.tasks.runs.transition(createdDetails.run, "PREPARING");
+    await driver.preflight();
     await first.orchestrator.prepareRun(
       requireTaskDetails(first.tasks, created.task.id),
       environment.repository,
@@ -195,7 +203,7 @@ describe("Phase 2 deterministic golden path", () => {
     const sessionFile = persistedSession.piSessionFile;
     if (!sessionFile) throw new Error("Expected a persisted PI session file");
     await readFile(sessionFile, "utf8");
-    driver.dispose();
+    await driver.dispose();
     firstDatabase.close();
 
     // WHEN: A new Runtime instance resumes the same durable TaskRun
@@ -243,6 +251,8 @@ describe("Phase 2 deterministic golden path", () => {
     const project = harness.projects.open(environment.repository, "9".repeat(64));
     const created = harness.tasks.create(
       createTaskRequestSchema.parse({ projectId: project.id, objective: testCase.objective }),
+      {},
+      createTestModelBinding(),
     );
 
     // WHEN: The orchestrator writes and exports the workspace diff
@@ -337,6 +347,8 @@ async function createGoldenPiDriver(
     { toolCall },
     { text: `Applied deterministic PI fix for ${testCase.id}` },
   ]);
+  const binding = harness.tasks.details(taskId)?.model;
+  if (!binding) throw new Error(`Task ${taskId} has no model binding`);
   return new PiTaskDriver({
     taskId,
     projectRoot,
@@ -344,8 +356,8 @@ async function createGoldenPiDriver(
     tasks: harness.tasks,
     sandboxes: harness.sandboxes,
     tools: harness.gateway,
-    model: faux.model,
-    modelRuntime: faux.modelRuntime,
+    binding,
+    prepareModelHandle: async () => faux.modelHandle,
   });
 }
 

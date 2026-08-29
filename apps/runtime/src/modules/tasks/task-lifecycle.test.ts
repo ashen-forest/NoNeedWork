@@ -1,6 +1,9 @@
 import { createTaskRequestSchema } from "@noneedwork/protocol";
 import { describe, expect, it } from "vitest";
 
+import { FakeCredentialVault } from "../credentials/fake-credential-vault.js";
+import { ModelPreferenceRepository } from "../models/model-preference-repository.js";
+import { ModelService } from "../models/model-service.js";
 import { RuntimeDatabase } from "../storage/database.js";
 import { ProjectRepository } from "../storage/repositories/project-repository.js";
 import { TaskRepository } from "../storage/repositories/task-repository.js";
@@ -14,11 +17,24 @@ function createFixture() {
   const projects = new ProjectRepository(database);
   const project = projects.open("C:/task-lifecycle", "8".repeat(64));
   const tasks = new TaskRepository(database);
-  const service = new TaskService(projects, tasks);
+  const service = new TaskService(
+    projects,
+    tasks,
+    new ModelService({
+      preferences: new ModelPreferenceRepository(database),
+      bindings: tasks.models,
+      credentials: new FakeCredentialVault(),
+    }),
+  );
   const details = service.create(
     createTaskRequestSchema.parse({ projectId: project.id, objective: "Exercise lifecycle" }),
   );
   if (!details.run) throw new Error("Expected created TaskRun");
+  expect(details.model).toMatchObject({
+    profileId: "qwen-cn",
+    modelId: "qwen3.7-plus",
+    selectionSource: "default",
+  });
   return { database, tasks, service, details, runId: details.run.id };
 }
 

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import type { ModelSelection } from "@noneedwork/protocol";
 import type { Command } from "commander";
+
+import { discoverRuntime } from "../client/runtime-discovery.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -30,12 +33,19 @@ export interface CommandResult {
   stderr: string;
 }
 
+export interface DoctorModelStatus {
+  runtimeAvailable: boolean;
+  selection?: ModelSelection;
+  credentialConfigured?: boolean;
+}
+
 export interface DoctorDependencies {
   run(command: string, args: readonly string[]): Promise<CommandResult>;
   platform: NodeJS.Platform;
   nodeVersion: string;
   env: NodeJS.ProcessEnv;
   verifyWritable(directory: string): Promise<boolean>;
+  modelStatus(): Promise<DoctorModelStatus>;
 }
 
 const defaultDependencies: DoctorDependencies = {
@@ -62,6 +72,25 @@ const defaultDependencies: DoctorDependencies = {
       return true;
     } catch {
       return false;
+    }
+  },
+  async modelStatus() {
+    const connection = await discoverRuntime();
+    if (!connection) return { runtimeAvailable: false };
+    try {
+      const [selection, credentials] = await Promise.all([
+        connection.client.getModelSelection(),
+        connection.client.listModelCredentials(),
+      ]);
+      return {
+        runtimeAvailable: true,
+        selection,
+        credentialConfigured:
+          credentials.credentials.find((credential) => credential.profileId === selection.profileId)
+            ?.configured ?? false,
+      };
+    } catch {
+      return { runtimeAvailable: false };
     }
   },
 };
@@ -144,25 +173,29 @@ export async function runDoctor(
         ),
   );
 
-  const credentialNames = [
-    "ANTHROPIC_API_KEY",
-    "OPENAI_API_KEY",
-    "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY",
-  ];
-  const configuredCredentials = credentialNames.filter((name) => Boolean(dependencies.env[name]));
+  const modelStatus = await dependencies.modelStatus();
   checks.push(
-    configuredCredentials.length > 0
+    modelStatus.runtimeAvailable && modelStatus.selection
       ? pass(
-          "model-credential",
-          "Model credential",
-          `${configuredCredentials.length} provider credential(s) found`,
+          "default-model",
+          "Default model",
+          `${modelStatus.selection.profileId}/${modelStatus.selection.modelId}`,
         )
+      : warn(
+          "default-model",
+          "Default model",
+          "Runtime model selection is unavailable",
+          "Start Runtime and run: nw model select <profile-id> <model-id>",
+        ),
+  );
+  checks.push(
+    modelStatus.credentialConfigured
+      ? pass("model-credential", "Model credential", "Selected profile credential is configured")
       : warn(
           "model-credential",
           "Model credential",
-          "No supported provider credential was detected",
-          "Set a provider key before running an agent task; secret values are never printed.",
+          "Selected profile credential is not configured",
+          "Run: nw model credential set <profile-id>",
         ),
   );
 

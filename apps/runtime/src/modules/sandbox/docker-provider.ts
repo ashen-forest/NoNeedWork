@@ -160,11 +160,26 @@ async function uploadWorkspaceArchive(container: Docker.Container, archive: Buff
   stream.end();
   await finished;
 
-  const inspection = await extraction.inspect();
+  const inspection = await inspectCompletedExec(extraction, 10_000);
   if (inspection.ExitCode !== 0) {
     throw new Error(
       `Sandbox workspace upload failed with ${String(inspection.ExitCode)}: ${Buffer.concat(stderrChunks).toString("utf8")}`,
     );
+  }
+}
+
+async function inspectCompletedExec(
+  execution: Docker.Exec,
+  timeoutMs: number,
+): Promise<Docker.ExecInspectInfo> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const inspection = await execution.inspect();
+    if (!inspection.Running && inspection.ExitCode !== null) return inspection;
+    if (Date.now() >= deadline) {
+      throw new Error("Sandbox workspace upload did not reach a terminal exec state");
+    }
+    await new Promise<void>((resolveWait) => setTimeout(resolveWait, 10));
   }
 }
 

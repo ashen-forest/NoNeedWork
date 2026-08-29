@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PlanStep, TaskDetails, TaskRun } from "@noneedwork/protocol";
 
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
+import { ModelBlockedError } from "../models/model-errors.js";
 import type { Planner, PlanService } from "../planning/plan-service.js";
 import type { StepVerifier, VerificationResult } from "../planning/step-verifier.js";
 import type { SandboxExecutor } from "../sandbox/docker-provider.js";
@@ -31,9 +32,10 @@ export interface StepExecutionResult {
 }
 
 export interface TaskDriver extends Planner {
+  preflight?(): Promise<void>;
   executeStep(input: { step: PlanStep; tools: TaskToolbox }): Promise<StepExecutionResult>;
   cancel?(): Promise<void>;
-  dispose?(): void;
+  dispose?(): Promise<void>;
 }
 
 export class StepExecutionError extends Error {
@@ -91,6 +93,17 @@ export class TaskOrchestrator {
 
     try {
       if (details.run.status === "CREATED") {
+        details = this.transition(details, "PREPARING");
+      }
+      if (
+        details.run &&
+        ["PREPARING", "PLANNING", "EXECUTING", "VERIFYING", "REPLANNING"].includes(
+          details.run.status,
+        )
+      ) {
+        await driver.preflight?.();
+      }
+      if (details.run?.status === "PREPARING") {
         await this.prepareRun(details, projectRoot);
         assertWithinDeadline(deadline);
         details = this.requireTask(taskId);
@@ -153,6 +166,30 @@ export class TaskOrchestrator {
       return details;
     } catch (error) {
       const current = this.requireTask(taskId);
+      if (
+        error instanceof ModelBlockedError &&
+        current.run &&
+        !isTerminalTaskStatus(current.run.status)
+      ) {
+        if (error.modelBlock.recoverable) {
+          const checkpointed = this.tasks.runs.checkpoint(current.run.id, {
+            boundary: "MODEL_BLOCKED",
+            resumeStatus: current.run.status,
+            modelBlock: error.modelBlock,
+            recordedAt: new Date().toISOString(),
+          });
+          assertTaskTransition(checkpointed.status, "PAUSED");
+          this.tasks.runs.transition(checkpointed, "PAUSED", "DIAGNOSTIC", {
+            modelBlock: error.modelBlock,
+          });
+        } else {
+          assertTaskTransition(current.run.status, "FAILED");
+          this.tasks.runs.transition(current.run, "FAILED", "DIAGNOSTIC", {
+            modelBlock: error.modelBlock,
+          });
+        }
+        return this.requireTask(taskId);
+      }
       if (current.run?.status === "PAUSED" || current.run?.status === "CANCELLED") {
         return current;
       }
@@ -177,7 +214,9 @@ export class TaskOrchestrator {
 
   async prepareRun(details: TaskDetails, projectRoot: string): Promise<void> {
     const run = requireRun(details);
-    const preparing = this.transition(details, "PREPARING");
+    if (run.status !== "PREPARING") {
+      throw new Error(`TaskRun ${run.id} must be PREPARING before sandbox creation`);
+    }
     const existing = this.sandboxes.getByRun(run.id);
     if (!existing) {
       const externalId = await this.sandboxProvider.createWorkspace(projectRoot);
@@ -189,7 +228,7 @@ export class TaskOrchestrator {
         resourceProfile: { schemaVersion: 1, profile: "offline-readonly-root-v1" },
       });
     }
-    this.checkpoints.record(requireRun(preparing).id, "SANDBOX_READY", {
+    this.checkpoints.record(run.id, "SANDBOX_READY", {
       sandboxId: this.requireSandbox(run.id),
     });
   }

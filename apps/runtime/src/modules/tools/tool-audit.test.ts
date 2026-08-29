@@ -6,6 +6,7 @@ import { createTaskRequestSchema } from "@noneedwork/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ArtifactStore } from "../artifacts/artifact-store.js";
+import { createTestModelBinding } from "../models/testing.js";
 import { RuntimeDatabase } from "../storage/database.js";
 import { ProjectRepository } from "../storage/repositories/project-repository.js";
 import { TaskRepository } from "../storage/repositories/task-repository.js";
@@ -33,6 +34,8 @@ describe("ToolAudit", () => {
       const tasks = new TaskRepository(database);
       const created = tasks.create(
         createTaskRequestSchema.parse({ projectId: project.id, objective: "Audit failure" }),
+        {},
+        createTestModelBinding(),
       );
       const createdRun = tasks.runs.get(created.runId);
       if (!createdRun) throw new Error("Expected created TaskRun");

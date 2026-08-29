@@ -5,8 +5,16 @@ import {
   createTaskRequestSchema,
   createTaskRunId,
   eventEnvelopeSchema,
+  modelBlockSchema,
+  modelCredentialSetRequestSchema,
+  modelCredentialStatusSchema,
+  modelProbeResultSchema,
+  modelProfileIdSchema,
+  modelProfileSchema,
+  modelSelectionSchema,
   projectIdSchema,
   taskBudgetSchema,
+  taskModelBindingSchema,
 } from "./index.js";
 
 describe("protocol identifiers", () => {
@@ -53,5 +61,98 @@ describe("event protocol", () => {
       payload: { message: "ready" },
     };
     expect(eventEnvelopeSchema.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
+  });
+});
+
+describe("model protocol", () => {
+  const now = "2026-08-29T00:00:00.000Z";
+
+  it("accepts only the two v0.1 profile identifiers", () => {
+    expect(modelProfileIdSchema.options).toEqual(["qwen-cn", "minimax-cn"]);
+    expect(modelProfileIdSchema.safeParse("openai").success).toBe(false);
+  });
+
+  it("validates a model selection and write-only credential request", () => {
+    expect(modelSelectionSchema.parse({ profileId: "qwen-cn", modelId: "qwen3.7-plus" })).toEqual({
+      profileId: "qwen-cn",
+      modelId: "qwen3.7-plus",
+    });
+    expect(modelCredentialSetRequestSchema.parse({ secret: `  ${"x".repeat(16)}  ` })).toEqual({
+      secret: "x".repeat(16),
+    });
+    expect(modelCredentialSetRequestSchema.safeParse({ secret: "too-short" }).success).toBe(false);
+  });
+
+  it("rejects secret-bearing public model responses", () => {
+    const publicValues = [
+      [
+        modelProfileSchema,
+        {
+          profileId: "qwen-cn",
+          displayName: "Qwen Token Plan CN",
+          defaultModelId: "qwen3.7-plus",
+          modelIds: ["qwen3.7-plus"],
+          capabilities: { text: true, thinking: true, toolCalls: true, images: false },
+        },
+      ],
+      [modelCredentialStatusSchema, { profileId: "qwen-cn", configured: true, updatedAt: now }],
+      [
+        modelProbeResultSchema,
+        {
+          profileId: "qwen-cn",
+          modelId: "qwen3.7-plus",
+          success: true,
+          latencyMs: 10,
+          checks: { text: true, toolCall: true },
+        },
+      ],
+      [
+        modelBlockSchema,
+        {
+          reason: "MODEL_CREDENTIAL_MISSING",
+          profileId: "qwen-cn",
+          modelId: "qwen3.7-plus",
+          recoverable: true,
+          action: "Configure the credential and resume the task.",
+        },
+      ],
+      [
+        taskModelBindingSchema,
+        {
+          runId: createTaskRunId(),
+          profileId: "qwen-cn",
+          piProviderId: "qwen-token-plan-cn",
+          modelId: "qwen3.7-plus",
+          piSdkVersion: "0.84.3",
+          selectionSource: "default",
+          createdAt: now,
+        },
+      ],
+    ] as const;
+
+    for (const [schema, value] of publicValues) {
+      expect(schema.safeParse({ ...value, secret: "must-not-pass" }).success).toBe(false);
+    }
+  });
+
+  it("bounds block reasons and integer timing fields", () => {
+    expect(
+      modelBlockSchema.safeParse({
+        reason: "SOME_PROVIDER_ERROR",
+        profileId: "qwen-cn",
+        modelId: "qwen3.7-plus",
+        recoverable: true,
+        action: "Retry",
+      }).success,
+    ).toBe(false);
+    expect(
+      modelProbeResultSchema.safeParse({
+        profileId: "qwen-cn",
+        modelId: "qwen3.7-plus",
+        success: true,
+        latencyMs: 2 ** 31,
+        checks: { text: true, toolCall: true },
+      }).success,
+    ).toBe(false);
   });
 });

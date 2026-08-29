@@ -1,16 +1,16 @@
 import {
   type CreateTaskRequest,
   createTaskId,
-  createTaskRunId,
   type TaskBudget,
   type TaskDetails,
+  type TaskModelBinding,
   type TaskSnapshot,
   taskBudgetSchema,
   taskDetailsSchema,
   taskSnapshotSchema,
 } from "@noneedwork/protocol";
 import { z } from "zod";
-
+import { ModelBindingRepository } from "../../models/model-binding-repository.js";
 import type { RuntimeDatabase } from "../database.js";
 import { decodePersistedJson, encodePersistedJson } from "../json.js";
 import { ArtifactRepository } from "./artifact-repository.js";
@@ -38,16 +38,22 @@ export class TaskRepository {
   readonly runs: TaskRunRepository;
   readonly steps: PlanStepRepository;
   readonly artifacts: ArtifactRepository;
+  readonly models: ModelBindingRepository;
 
   constructor(private readonly database: RuntimeDatabase) {
     this.runs = new TaskRunRepository(database);
     this.steps = new PlanStepRepository(database);
     this.artifacts = new ArtifactRepository(database);
+    this.models = new ModelBindingRepository(database);
   }
 
-  create(request: CreateTaskRequest, config: Record<string, unknown> = {}): CreatedTask {
+  create(
+    request: CreateTaskRequest,
+    config: Record<string, unknown>,
+    binding: TaskModelBinding,
+  ): CreatedTask {
     const taskId = createTaskId();
-    const runId = createTaskRunId();
+    const runId = binding.runId;
     const budget = taskBudgetSchema.parse(request.budget ?? {});
     const now = new Date().toISOString();
 
@@ -76,6 +82,7 @@ export class TaskRepository {
           ) VALUES (?, ?, 'CREATED', 0, ?, 0, ?, ?)
         `)
         .run(runId, taskId, encodePersistedJson(config), now, now);
+      this.models.insert(binding);
       this.runs.events.append(taskId, runId, "TASK_STATE_CHANGED", {
         from: null,
         to: "CREATED",
@@ -95,9 +102,10 @@ export class TaskRepository {
     const task = this.get(id);
     if (!task) return undefined;
     const run = task.currentRunId ? (this.runs.get(task.currentRunId) ?? null) : null;
+    const model = run ? (this.models.get(run.id) ?? null) : null;
     const planSteps = run ? this.steps.list(run.id) : [];
     const artifactIds = run ? this.artifacts.listByRun(run.id).map((artifact) => artifact.id) : [];
-    return taskDetailsSchema.parse({ task, run, planSteps, artifactIds });
+    return taskDetailsSchema.parse({ task, run, model, planSteps, artifactIds });
   }
 
   list(projectId?: string): TaskSnapshot[] {
