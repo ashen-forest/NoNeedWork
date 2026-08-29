@@ -1,7 +1,7 @@
 # NoNeedWork Qwen 与 MiniMax Token Plan 适配设计
 
 - 日期：2026-08-29
-- 状态：设计方向已批准，等待书面规范审阅
+- 状态：已批准
 - 目标版本：v0.1 / Phase 3
 - PI SDK：`@earendil-works/pi-ai` 与 `@earendil-works/pi-coding-agent` `0.84.3`
 
