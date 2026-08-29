@@ -79,6 +79,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci --ignore-scripts
+      - name: Build workspace packages for integration imports
+        run: npm run build:packages
       - name: Build pinned sandbox image
         run: docker build --tag noneedwork/sandbox:0.1 images/sandbox
       - name: Run Docker isolation contract

@@ -104,12 +104,13 @@ function resolveTarget(hostPlatform, hostArch) {
 async function findHostKeyringBinary(nodeModules, expectedName) {
   const keyringRoot = join(nodeModules, "@napi-rs");
   const files = await collectFiles(keyringRoot);
-  const binaries = files.filter(
-    (path) => basename(path).startsWith("keyring.") && path.endsWith(".node"),
-  );
-  if (binaries.length !== 1 || basename(binaries[0]) !== expectedName) {
+  const binaries = files.filter((path) => basename(path) === expectedName);
+  if (binaries.length !== 1) {
+    const discovered = files.filter(
+      (path) => basename(path).startsWith("keyring.") && path.endsWith(".node"),
+    );
     throw new Error(
-      `Expected exactly one compatible keyring binary ${expectedName}; found ${binaries.map((path) => basename(path)).join(", ") || "none"}`,
+      `Expected exactly one compatible keyring binary ${expectedName}; found ${discovered.map((path) => basename(path)).join(", ") || "none"}`,
     );
   }
   return binaries[0];
