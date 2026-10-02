@@ -31,12 +31,12 @@
     "sidecar:verify": "node scripts/verify-sidecar.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
-    "@types/node": "24.13.3",
-    "@vitest/coverage-v8": "4.1.11",
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "26.6.3",
+    "@vitest/coverage-v8": "5.0.2",
     "postject": "1.0.0-alpha.6",
-    "tsx": "4.23.12",
+    "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "vitest": "4.1.11"
+    "vitest": "5.0.2"
   }
 }
